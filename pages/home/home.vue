@@ -23,19 +23,19 @@
       scroll-y
       :style="{ opacity: pageReady ? 1 : 0 }"
     >
-      <!-- 一号车间的组件 -->
-      <view v-if="currentWorkshop === 1">
-        <view class="component-container">
-          <view class="component-box">组件一</view>
-          <view class="component-box">组件二</view>
+      <!-- 添加一个顶部内边距容器 -->
+      <view class="content-wrapper">
+        <!-- 一号车间的组件 -->
+        <view v-if="currentWorkshop === 1">
+          <workshop-one></workshop-one>
         </view>
-      </view>
 
-      <!-- 二号车间的组件 -->
-      <view v-if="currentWorkshop === 2">
-        <view class="component-container">
-          <view class="component-box">组件一</view>
-          <view class="component-box">组件二</view>
+        <!-- 二号车间的组件 -->
+        <view v-if="currentWorkshop === 2">
+          <view class="component-container">
+            <view class="component-box">组件一</view>
+            <view class="component-box">组件二</view>
+          </view>
         </view>
       </view>
     </scroll-view>
@@ -43,7 +43,12 @@
 </template>
 
 <script>
+import WorkshopOne from '@/components/workshop-one/workshop-one.vue'
+
 export default {
+  components: {
+    WorkshopOne
+  },
   data() {
     return {
       username: '张工',
@@ -180,6 +185,11 @@ export default {
     bottom: 0;
     z-index: 1;
     transition: opacity 0.3s ease;
+
+    // 添加内容包装器样式
+    .content-wrapper {
+      padding: 20rpx 0;
+    }
   }
 
   .component-container {
