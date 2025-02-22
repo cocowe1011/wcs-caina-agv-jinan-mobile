@@ -1,0 +1,48 @@
+// 主题色
+$primary-color: #0c1f4c;
+$primary-light: #1e3799;
+$secondary-color: #273c75;
+
+// 渐变
+$primary-gradient: linear-gradient(135deg, $primary-color, $primary-light);
+$secondary-gradient: linear-gradient(135deg, $primary-color, $secondary-color);
+
+// 阴影
+$card-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.15);
+$hover-shadow: 0 8rpx 30rpx rgba(0, 0, 0, 0.2);
+
+// 边框
+$border-radius: 16rpx;
+$border-radius-lg: 24rpx;
+
+// 动画
+$transition-fast: 0.2s ease;
+$transition-normal: 0.3s ease;
+
+// 颜色
+$text-primary: #333;
+$text-secondary: #666;
+$text-light: #999;
+$border-color: #eee;
+$bg-light: #f0f2f5;
+$success-color: #00b894;
+$warning-color: #fdcb6e;
+$error-color: #d63031; 
+
+// 背景色
+$bg-dark: #1a1a2e;
+
+// 字体
+$font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 
+  Helvetica, Segoe UI, Arial, Roboto, 'PingFang SC', 'miui', 
+  'Hiragino Sans GB', 'Microsoft Yahei', sans-serif;
+
+// 系统信息
+$status-bar-height: var(--status-bar-height, 0);
+$nav-bar-height: 90rpx;
+$safe-area-inset-top: var(--safe-area-inset-top, 0);
+$safe-area-inset-bottom: var(--safe-area-inset-bottom, 0);
+
+// 计算后的安全区域
+$safe-content-top: calc($status-bar-height + $nav-bar-height);
+$safe-content-bottom: $safe-area-inset-bottom;

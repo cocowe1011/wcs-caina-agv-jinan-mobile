@@ -1,0 +1,19 @@
+smart-factory/
+├── pages/
+│   ├── login/
+│   │   └── login.vue
+│   ├── home/
+│   │   └── home.vue
+│   └── queue/
+│       └── queue.vue
+├── static/
+│   └── images/
+├── store/
+│   └── index.js
+├── utils/
+│   ├── request.js
+│   └── auth.js
+├── components/
+│   ├── order-card.vue
+│   └── pallet-list.vue
+└── App.vue 

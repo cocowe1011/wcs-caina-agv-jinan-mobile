@@ -1,0 +1,21 @@
+{
+	"pages": [{
+		"path": "pages/login/login",
+		"style": {
+			"navigationBarTitleText": "登录",
+			"navigationStyle": "custom"
+		}
+	}, {
+		"path": "pages/home/home",
+		"style": {
+			"navigationBarTitleText": "智慧车间",
+			"navigationStyle": "custom"
+		}
+	}],
+	"globalStyle": {
+		"navigationBarTextStyle": "white",
+		"navigationBarTitleText": "智慧车间",
+		"navigationBarBackgroundColor": "#16222A",
+		"backgroundColor": "#F5F7FA"
+	}
+}
