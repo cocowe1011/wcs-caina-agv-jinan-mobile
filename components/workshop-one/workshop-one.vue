@@ -68,10 +68,10 @@ export default {
         { name: 'P10', hasPallet: true, palletCode: 'P2023006' },
       ],
       emptyPalletPositions: [
-        { name: '空托盘1', hasPallet: true, palletCode: 'E2023001' },
-        { name: '空托盘2', hasPallet: false },
-        { name: '空托盘3', hasPallet: true, palletCode: 'E2023002' },
-        { name: '空托盘4', hasPallet: false },
+        { name: 'E1', hasPallet: true, palletCode: 'E2023001' },
+        { name: 'E2', hasPallet: false },
+        { name: 'E3', hasPallet: true, palletCode: 'E2023002' },
+        { name: 'E4', hasPallet: false },
       ]
     }
   }
