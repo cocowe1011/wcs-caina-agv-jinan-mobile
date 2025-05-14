@@ -32,10 +32,7 @@
 
         <!-- 二号车间的组件 -->
         <view v-if="currentWorkshop === 2">
-          <view class="component-container">
-            <view class="component-box">组件一</view>
-            <view class="component-box">组件二</view>
-          </view>
+          <workshop-two></workshop-two>
         </view>
       </view>
     </scroll-view>
@@ -44,18 +41,20 @@
 
 <script>
 import WorkshopOne from '@/components/workshop-one/workshop-one.vue'
+import WorkshopTwo from '@/components/workshop-two/workshop-two.vue'
 
 export default {
   components: {
-    WorkshopOne
+    WorkshopOne,
+    WorkshopTwo
   },
   data() {
     return {
-      username: '张工',
+      username: '测试员',
       statusBarHeight: 0,
       pageReady: false,
-      currentWorkshop: 1, // 默认显示一号车间
-      workshops: ['一号车间', '二号车间']
+      currentWorkshop: 1, // 默认显示2800车间
+      workshops: ['2800车间', '2500车间']
     }
   },
   
@@ -116,10 +115,10 @@ export default {
     .left-section {
       display: flex;
       align-items: center;
-      gap: 20rpx;
       
       .welcome {
         font-size: 32rpx;
+        line-height: 1;
       }
       
       .workshop-selector {
@@ -130,6 +129,9 @@ export default {
         padding: 4rpx 16rpx;
         border-radius: 30rpx;
         border: 1px solid rgba(255, 255, 255, 0.2);
+        line-height: 48rpx;
+        height: 48rpx;
+        margin-left: 10rpx;
         
         .icon-location {
           font-size: 24rpx;

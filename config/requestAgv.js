@@ -1,7 +1,7 @@
 const config = {
   baseUrl: process.env.NODE_ENV === 'development' 
-    ? 'http://10.120.50.99:7005'  // 开发环境
-    : 'http://10.120.50.99:7005', // 生产环境
+    ? 'http://10.120.50.3'  // 开发环境
+    : 'http://10.120.50.3', // 生产环境
   timeout: 5000
 }
 
@@ -12,6 +12,10 @@ const request = (options) => {
       ...options,
       url: config.baseUrl + options.url,
       timeout: config.timeout,
+      header: {
+        ...options.header,
+        'X-LR-REQUEST-ID': Date.now().toString()
+      },
       success: (res) => {
         resolve(res.data)
       },
