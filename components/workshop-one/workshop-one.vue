@@ -39,8 +39,19 @@
         >
           <view class="card-header">
             <view class="position-badge">{{ item.queueName + item.queueNum }}</view>
-            <view class="status-tag" :class="getStatusClass(item.trayStatus)">
-              {{ getStatusText(item.trayStatus) }}
+            <view class="header-right">
+              <view class="status-tag" :class="getStatusClass(item.trayStatus)">
+                {{ getStatusText(item.trayStatus) }}
+              </view>
+              <view v-if="item.trayInfo" class="verify-tray-btn" @click="verifyTrayCode(item)">
+                校验
+              </view>
+              <view v-if="item.trayInfo" class="move-tray-btn" @click="showMovePalletModal(item)">
+                移位
+              </view>
+              <view v-if="item.trayInfo" class="remove-tray-btn" @click="showRemoveTrayConfirm(item)">
+                移除
+              </view>
             </view>
           </view>
           
@@ -48,7 +59,10 @@
             <view class="left-section">
               <view class="info-item">
                 <text class="info-label">托盘码</text>
-                <text class="info-value">{{ item.trayInfo }}</text>
+                <text class="info-value" v-if="item.trayInfo">{{ item.trayInfo }}</text>
+                <view class="scan-add-btn" v-else @click="scanToAddWasteTray(item)">
+                  <text class="scan-btn-text">扫码添加废料托盘</text>
+                </view>
               </view>
               <view class="info-item">
                 <text class="info-label">产品名称</text>
@@ -91,6 +105,37 @@
         <text class="empty-text">暂无托盘数据</text>
       </view>
     </view>
+    
+    <!-- 托盘移位弹窗 -->
+    <view class="modal-overlay" v-if="showMoveModal" @click="cancelMove">
+      <view class="modal-content" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">选择移位目标位置</text>
+          <text class="modal-close" @click="cancelMove">×</text>
+        </view>
+        <view class="modal-body">
+          <view class="position-list">
+            <view 
+              v-for="(pos, idx) in availablePositions" 
+              :key="idx" 
+              class="position-item"
+              :class="{'selected': selectedPosition === pos.position}"
+              @click="selectPosition(pos.position)"
+            >
+              <view class="position-name">{{ pos.position }}</view>
+              <view class="position-status">
+                <text v-if="pos.hasTray" class="has-tray">已有托盘 (互换)</text>
+                <text v-else class="no-tray">空位置</text>
+              </view>
+            </view>
+          </view>
+        </view>
+        <view class="modal-footer">
+          <view class="modal-btn cancel" @click="cancelMove">取消</view>
+          <view class="modal-btn confirm" @click="confirmMove" :class="{'disabled': !selectedPosition}">确认移位</view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -113,7 +158,12 @@ export default {
         'B': [],
         'C': []
       },
-      loading: false
+      loading: false,
+      // 新增托盘移位相关数据
+      showMoveModal: false,
+      currentPallet: null,
+      selectedPosition: '',
+      availablePositions: []
     }
   },
   computed: {
@@ -140,10 +190,7 @@ export default {
         queueName: queueName,
       }).then(res => {
         if (res.code === '200' && Array.isArray(res.data)) {
-          // 过滤状态大于等于2的数据
-          this.queueData[queueName] = res.data.filter(item => {
-            return item.trayStatus && parseInt(item.trayStatus) >= 2;
-          });
+          this.queueData[queueName] = res.data
         } else {
           this.queueData[queueName] = [];
           uni.showToast({
@@ -163,6 +210,10 @@ export default {
     },
     getStatusText(status) {
       switch(status) {
+        case '0':
+          return '在2800等待AGV取货';
+        case '1':
+          return '已在2800取货，正往缓存区运送';
         case '2':
           return '已送至二楼缓存区';
         case '3':
@@ -170,11 +221,15 @@ export default {
         case '4':
           return '已在缓存区取货，正往运往目的地';
         default:
-          return '未知状态';
+          return '暂无托盘';
       }
     },
     getStatusClass(status) {
       switch(status) {
+        case '0':
+          return 'status-waiting';
+        case '1':
+          return 'status-moving';
         case '2':
           return 'status-delivered';
         case '3':
@@ -356,6 +411,348 @@ export default {
     cancelSend(item) {
       this.$set(item, 'showDestinationInput', false);
       this.$set(item, 'destination', '');
+    },
+    
+    // 扫码添加废料托盘功能
+    scanToAddWasteTray(item) {
+      // 调用扫码API
+      uni.scanCode({
+        success: (res) => {
+          // 扫码成功后，将扫码结果作为trayInfo传递
+          this.updateToWasteTray(item, res.result);
+        },
+        fail: (err) => {
+          uni.showToast({
+            title: '扫码失败',
+            icon: 'none'
+          });
+        }
+      });
+    },
+    
+    // 更新为废料托盘
+    updateToWasteTray(item, scanResult) {
+      this.loading = true;
+      
+      const param = {
+        id: item.id,
+        trayInfo: scanResult, // 使用扫码得到的条码作为trayInfo
+        trayStatus: '2',
+        trayInfoAdd: '废料托盘'
+      };
+      
+      request.post('/queue_info/update', param)
+        .then(res => {
+          if (res.code === '200' && res.data == 1) {
+            uni.showToast({
+              title: '废料托盘添加成功',
+              icon: 'success'
+            });
+            
+            // 更新本地数据
+            this.$set(item, 'trayInfo', scanResult); // 使用扫码结果
+            this.$set(item, 'trayStatus', '2');
+            this.$set(item, 'trayInfoAdd', '废料托盘');
+            
+            // 重新加载当前区域数据
+            this.fetchQueueData();
+          } else {
+            uni.showToast({
+              title: '废料托盘添加失败',
+              icon: 'none'
+            });
+          }
+        })
+        .catch(err => {
+          uni.showToast({
+            title: '网络请求失败',
+            icon: 'none'
+          });
+          console.error('更新失败:', err);
+        })
+        .finally(() => {
+          this.loading = false;
+        });
+    },
+    
+    // 显示移位模态框
+    showMovePalletModal(item) {
+      this.currentPallet = item;
+      this.selectedPosition = '';
+      this.showMoveModal = true;
+      
+      // 准备可用位置列表
+      this.prepareAvailablePositions();
+    },
+    
+    // 准备可用位置列表
+    prepareAvailablePositions() {
+      const currentCode = this.tabs[this.currentTab].code;
+      const positions = [];
+      
+      // 将当前区域的所有位置加入列表
+      this.queueData[currentCode].forEach(item => {
+        // 排除当前托盘自己的位置
+        if (this.currentPallet && (item.queueName + item.queueNum) === (this.currentPallet.queueName + this.currentPallet.queueNum)) {
+          return;
+        }
+        
+        positions.push({
+          position: item.queueName + item.queueNum,
+          hasTray: !!item.trayInfo,
+          item: item
+        });
+      });
+      
+      this.availablePositions = positions;
+    },
+    
+    // 选择目标位置
+    selectPosition(position) {
+      this.selectedPosition = position;
+    },
+    
+    // 取消移位
+    cancelMove() {
+      this.showMoveModal = false;
+      this.currentPallet = null;
+      this.selectedPosition = '';
+      this.availablePositions = [];
+    },
+    
+    // 确认移位
+    confirmMove() {
+      if (!this.selectedPosition) {
+        uni.showToast({
+          title: '请选择目标位置',
+          icon: 'none'
+        });
+        return;
+      }
+      
+      // 确认对话框
+      uni.showModal({
+        title: '确认移位',
+        content: `确定要将托盘从 ${this.currentPallet.queueName + this.currentPallet.queueNum} 移至 ${this.selectedPosition} 吗？`,
+        success: (res) => {
+          if (res.confirm) {
+            this.executePalletMove();
+          }
+        }
+      });
+    },
+    
+    // 执行托盘移位
+    executePalletMove() {
+      this.loading = true;
+      
+      // 找到目标位置对应的托盘数据
+      const targetPosition = this.availablePositions.find(pos => pos.position === this.selectedPosition);
+      
+      if (!targetPosition) {
+        uni.showToast({
+          title: '目标位置不存在',
+          icon: 'none'
+        });
+        this.loading = false;
+        return;
+      }
+      
+      // 准备更新数据
+      const updateList = [];
+      
+      // 当前托盘数据
+      const sourcePallet = { ...this.currentPallet };
+      // 目标位置托盘数据
+      const targetPallet = targetPosition.item ? { ...targetPosition.item } : null;
+      
+      // 如果目标位置没有托盘信息，直接移动
+      if (!targetPallet.trayInfo) {
+        // 目标位置获取源托盘信息
+        updateList.push({
+          id: targetPallet.id,
+          trayInfo: sourcePallet.trayInfo,
+          trayStatus: sourcePallet.trayStatus,
+          trayInfoAdd: sourcePallet.trayInfoAdd,
+          robotTaskCode: sourcePallet.robotTaskCode,
+          targetPosition: sourcePallet.targetPosition
+        });
+        
+        // 源托盘位置清空信息
+        updateList.push({
+          id: sourcePallet.id,
+          trayInfo: '',
+          trayStatus: '',
+          trayInfoAdd: '',
+          robotTaskCode: '',
+          targetPosition: ''
+        });
+      } else {
+        // 如果目标位置有托盘，则交换五个指定参数
+        
+        // 目标位置托盘获取源托盘信息
+        updateList.push({
+          id: targetPallet.id,
+          trayInfo: sourcePallet.trayInfo,
+          trayStatus: sourcePallet.trayStatus,
+          trayInfoAdd: sourcePallet.trayInfoAdd,
+          robotTaskCode: sourcePallet.robotTaskCode,
+          targetPosition: sourcePallet.targetPosition
+        });
+        
+        // 源位置托盘获取目标托盘信息
+        updateList.push({
+          id: sourcePallet.id,
+          trayInfo: targetPallet.trayInfo,
+          trayStatus: targetPallet.trayStatus,
+          trayInfoAdd: targetPallet.trayInfoAdd,
+          robotTaskCode: targetPallet.robotTaskCode,
+          targetPosition: targetPallet.targetPosition
+        });
+      }
+      
+      // 调用批量更新API
+      request.post('/queue_info/updateByList', updateList)
+        .then(res => {
+          if (res.code === '200' && res.data == 1) {
+            uni.showToast({
+              title: '托盘移位成功',
+              icon: 'success'
+            });
+            
+            // 重新加载数据
+            this.fetchQueueData();
+          } else {
+            uni.showToast({
+              title: '托盘移位失败: ' + (res.msg || '未知错误'),
+              icon: 'none'
+            });
+          }
+        })
+        .catch(err => {
+          uni.showToast({
+            title: '托盘移位请求失败',
+            icon: 'none'
+          });
+          console.error('移位失败:', err);
+        })
+        .finally(() => {
+          this.loading = false;
+          this.cancelMove();
+        });
+    },
+    
+    // 显示移除托盘确认对话框
+    showRemoveTrayConfirm(item) {
+      uni.showModal({
+        title: '确认移除',
+        content: `确定要移除托盘 ${item.trayInfo} 吗？`,
+        success: (res) => {
+          if (res.confirm) {
+            this.removeTray(item);
+          }
+        }
+      });
+    },
+    
+    // 移除托盘信息
+    removeTray(item) {
+      this.loading = true;
+      
+      const param = {
+        id: item.id,
+        trayInfo: '',
+        trayStatus: '',
+        trayInfoAdd: '',
+        robotTaskCode: '',
+        targetPosition: ''
+      };
+      
+      request.post('/queue_info/update', param)
+        .then(res => {
+          if (res.code === '200' && res.data == 1) {
+            uni.showToast({
+              title: '托盘信息已移除',
+              icon: 'success'
+            });
+            
+            // 重新加载当前区域数据
+            this.fetchQueueData();
+          } else {
+            uni.showToast({
+              title: '托盘信息移除失败',
+              icon: 'none'
+            });
+          }
+        })
+        .catch(err => {
+          uni.showToast({
+            title: '网络请求失败',
+            icon: 'none'
+          });
+          console.error('移除失败:', err);
+        })
+        .finally(() => {
+          this.loading = false;
+        });
+    },
+    
+    // 校验托盘条码
+    verifyTrayCode(item) {
+      // 调用扫码API
+      uni.scanCode({
+        success: (res) => {
+          // 扫码成功后，将扫码结果作为trayInfo传递
+          this.updateTrayCode(item, res.result);
+        },
+        fail: (err) => {
+          uni.showToast({
+            title: '扫码失败',
+            icon: 'none'
+          });
+        }
+      });
+    },
+    
+    // 更新托盘条码
+    updateTrayCode(item, newTrayCode) {
+      this.loading = true;
+      
+      const param = {
+        id: item.id,
+        trayInfo: newTrayCode
+      };
+      
+      request.post('/queue_info/update', param)
+        .then(res => {
+          if (res.code === '200' && res.data == 1) {
+            uni.showToast({
+              title: '托盘条码更新成功',
+              icon: 'success'
+            });
+            
+            // 更新本地数据
+            this.$set(item, 'trayInfo', newTrayCode);
+            
+            // 重新加载当前区域数据
+            this.fetchQueueData();
+          } else {
+            uni.showToast({
+              title: '托盘条码更新失败',
+              icon: 'none'
+            });
+          }
+        })
+        .catch(err => {
+          uni.showToast({
+            title: '网络请求失败',
+            icon: 'none'
+          });
+          console.error('更新失败:', err);
+        })
+        .finally(() => {
+          this.loading = false;
+        });
     }
   }
 }
@@ -520,6 +917,12 @@ export default {
           border-radius: 8rpx;
         }
         
+        .header-right {
+          display: flex;
+          align-items: center;
+          gap: 12rpx;
+        }
+        
         .status-tag {
           font-size: 24rpx;
           padding: 6rpx 16rpx;
@@ -539,6 +942,48 @@ export default {
           &.status-moving {
             color: #2563eb;
             background: #eff6ff;
+          }
+        }
+        
+        .verify-tray-btn {
+          background: #10b981;
+          color: #fff;
+          padding: 6rpx 16rpx;
+          border-radius: 6rpx;
+          font-size: 24rpx;
+          font-weight: 500;
+          margin-left: 8rpx;
+          
+          &:active {
+            background: #059669;
+          }
+        }
+        
+        .move-tray-btn {
+          background: #8b5cf6;
+          color: #fff;
+          padding: 6rpx 16rpx;
+          border-radius: 6rpx;
+          font-size: 24rpx;
+          font-weight: 500;
+          margin-left: 8rpx;
+          
+          &:active {
+            background: #7c3aed;
+          }
+        }
+        
+        .remove-tray-btn {
+          background: #ef4444;
+          color: #fff;
+          padding: 6rpx 16rpx;
+          border-radius: 6rpx;
+          font-size: 24rpx;
+          font-weight: 500;
+          margin-left: 8rpx;
+          
+          &:active {
+            background: #dc2626;
           }
         }
       }
@@ -583,6 +1028,27 @@ export default {
               word-wrap: break-word;
               white-space: normal;
               line-height: 1.4;
+            }
+          }
+          
+          // 扫码添加按钮
+          .scan-add-btn {
+            background: #10b981;
+            color: #fff;
+            padding: 12rpx 24rpx;
+            border-radius: 8rpx;
+            font-size: 26rpx;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            
+            &:active {
+              background: #059669;
+            }
+            
+            .scan-btn-text {
+              color: #ffffff;
+              font-weight: 500;
             }
           }
         }
@@ -684,6 +1150,148 @@ export default {
       .empty-text {
         font-size: 28rpx;
         color: #9ca3af;
+      }
+    }
+  }
+  
+  // 移位模态框样式
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    
+    .modal-content {
+      width: 90%;
+      max-width: 650rpx;
+      background: #fff;
+      border-radius: 16rpx;
+      overflow: hidden;
+      box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.2);
+      
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 24rpx;
+        border-bottom: 1px solid #f3f4f6;
+        
+        .modal-title {
+          font-size: 32rpx;
+          font-weight: 600;
+          color: #1f2937;
+        }
+        
+        .modal-close {
+          font-size: 40rpx;
+          color: #6b7280;
+          padding: 0 16rpx;
+          
+          &:active {
+            color: #374151;
+          }
+        }
+      }
+      
+      .modal-body {
+        padding: 24rpx 24rpx;
+        max-height: 800rpx;
+        overflow-y: auto;
+        
+        .position-list {
+          display: flex;
+          flex-direction: column;
+          gap: 24rpx;
+        }
+        
+        .position-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 24rpx;
+          border-radius: 8rpx;
+          border: 1px solid #e5e7eb;
+          transition: all 0.2s;
+          
+          &:not(:last-child) {
+            margin-bottom: 4rpx;
+          }
+          
+          &.selected {
+            border-color: #2563eb;
+            background: rgba(37, 99, 235, 0.05);
+          }
+          
+          &:active {
+            background: rgba(0, 0, 0, 0.02);
+          }
+          
+          .position-name {
+            font-size: 28rpx;
+            font-weight: 500;
+            color: #1f2937;
+            padding: 4rpx 0;
+          }
+          
+          .position-status {
+            font-size: 26rpx;
+            padding: 4rpx 0;
+            
+            .has-tray {
+              color: #f59e0b;
+            }
+            
+            .no-tray {
+              color: #10b981;
+            }
+          }
+        }
+      }
+      
+      .modal-footer {
+        display: flex;
+        padding: 24rpx;
+        border-top: 1px solid #f3f4f6;
+        
+        .modal-btn {
+          flex: 1;
+          text-align: center;
+          padding: 20rpx 0;
+          font-size: 28rpx;
+          font-weight: 500;
+          border-radius: 8rpx;
+          
+          &.cancel {
+            background: #f3f4f6;
+            color: #4b5563;
+            margin-right: 16rpx;
+            
+            &:active {
+              background: #e5e7eb;
+            }
+          }
+          
+          &.confirm {
+            background: #2563eb;
+            color: #fff;
+            
+            &:active {
+              background: #1d4ed8;
+            }
+            
+            &.disabled {
+              background: #93c5fd;
+              color: #eff6ff;
+              pointer-events: none;
+            }
+          }
+        }
       }
     }
   }
