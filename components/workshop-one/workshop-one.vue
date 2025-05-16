@@ -143,6 +143,12 @@
       <text class="fab-text">任务</text>
     </view>
 
+    <!-- 新增: AGV调度悬浮按钮 -->
+    <view class="fab-btn agv-schedule-fab" @click="toggleAgvScheduleModal">
+      <text class="fab-text">AGV</text>
+      <text class="fab-text">调度</text>
+    </view>
+
     <!-- AGV运行中任务管理弹窗 -->
     <view class="modal-overlay" v-if="showAgvTaskModal" @click="toggleAgvTaskModal">
       <view class="agv-task-modal-content" @click.stop>
@@ -234,6 +240,67 @@
         </view>
       </view>
     </view>
+
+    <!-- 新增: AGV调度弹窗 -->
+    <view class="modal-overlay" v-if="showAgvScheduleModal" @click="toggleAgvScheduleModal">
+      <view class="agv-schedule-modal-content" @click.stop>
+        <view class="agv-schedule-modal-header">
+          AGV手动调度
+        </view>
+        <view class="agv-schedule-modal-body">
+          <view class="schedule-input-group">
+            <text class="schedule-label">起点：</text>
+            <input 
+              class="schedule-input" 
+              type="text" 
+              placeholder="输入或选择起点 (如: AGV2-1, C1)" 
+              :value="agvScheduleData.startPosition"
+              @input="(e) => handleAgvScheduleInput('startPosition', e.target.value)"
+            />
+            <!-- <picker mode="selector" :range="startAgvPositions" range-key="value" @change="(e) => handleAgvScheduleInput('startPosition', startAgvPositions[e.detail.value].value)">
+              <view class="schedule-input picker-input">
+                {{ agvScheduleData.startPosition || '选择起点' }}
+              </view>
+            </picker> -->
+          </view>
+          <view class="schedule-input-group">
+            <text class="schedule-label">终点：</text>
+            <input 
+              class="schedule-input" 
+              type="text" 
+              placeholder="输入或选择终点 (如: AGV2-2, A10)" 
+              :value="agvScheduleData.endPosition"
+              @input="(e) => handleAgvScheduleInput('endPosition', e.target.value)"
+            />
+             <!-- <picker mode="selector" :range="endAgvPositions" range-key="value" @change="(e) => handleAgvScheduleInput('endPosition', endAgvPositions[e.detail.value].value)">
+              <view class="schedule-input picker-input">
+                {{ agvScheduleData.endPosition || '选择终点' }}
+              </view>
+            </picker> -->
+          </view>
+        </view>
+        <view class="agv-schedule-modal-footer">
+          <view class="schedule-btn single-exec-btn" @click="handleSingleModeChange">
+            单次执行
+          </view>
+          <view 
+            v-if="agvScheduleData.status === 'cycleRunning'" 
+            class="schedule-btn stop-cycle-btn" 
+            @click="handleAgvModeChange(false)">
+            停止循环执行
+          </view>
+          <view 
+            v-else 
+            class="schedule-btn cycle-exec-btn" 
+            @click="handleAgvModeChange(true)">
+            循环执行
+          </view>
+          <view class="schedule-btn close-btn" @click="toggleAgvScheduleModal">
+            关闭
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -267,6 +334,24 @@ export default {
       currentAgvTaskTab: 'floor1', // Default tab: 'floor1', 'floor2', 'floor3'
       allAgvTasks: [], 
       agvTasksLoading: false,
+      // 新增: AGV调度相关数据
+      showAgvScheduleModal: false,
+      agvScheduleData: {
+        startPosition: '',
+        endPosition: '',
+        status: 'idle', // idle, singleRunning, cycleRunning
+      },
+      agvCodeMap: {
+        'AGV2-1': '102', // 2800转盘出口，对应PLC的DBW8.2 AGV2-1空闲允许放货(PLC给RCS) -> 修改为2800出口给AGV
+        'AGV2-2': '201', // AGV2-2队列，对应PLC的DBW8.2 AGV2-2空闲允许放货(PLC给RCS)
+        'AGV2-3': '301', // AGV2-3队列，对应PLC的DBW8.3 AGV2-3空闲允许放货(PLC给RCS)
+        '2500输送线': '101',// 2500提升机入口
+        'AGV1-1': '202', // 一楼提升机出口
+        'AGV3-1': '302'  // 三楼提升机出口
+      },
+      // 这些列表可以用于未来的校验或picker组件
+      // startAgvPositions: [ { value: 'AGV2-1' }, { value: 'AGV1-1' }, { value: 'AGV3-1' } ],
+      // endAgvPositions: [{ value: 'AGV2-2' }, { value: 'AGV2-3' }],
     }
   },
   computed: {
@@ -341,13 +426,13 @@ export default {
         case '0':
           return '在2800等待AGV取货';
         case '1':
-          return '已在2800取货，正往缓存区运送';
+          return '2800已取,正运往缓存区';
         case '2':
           return '已送至二楼缓存区';
         case '3':
           return '在缓存区等待AGV取货';
         case '4':
-          return '已在缓存区取货，正往运往目的地';
+          return '缓存区已取,正运往目的地';
         default:
           return '暂无托盘';
       }
@@ -889,6 +974,9 @@ export default {
       if (this.showAgvTaskModal) {
         this.currentAgvTaskTab = 'floor1'; // 重置到默认tab
         this.fetchAgvTasks(); 
+      } else {
+        // 关闭弹窗时刷新主列表
+        this.fetchQueueData();
       }
     },
     switchAgvTaskTab(tabName) {
@@ -993,66 +1081,409 @@ export default {
     // 发送AGV取消任务指令
     async sendCancelAgvCommand(robotTaskCode, trayInfo) {
       // 测试用，返回当前时间戳
-      return Date.now().toString();
+      // return Date.now().toString(); 
+      // 上面的测试代码保留，实际对接时移除
       // 组装入参
-      // const params = {
-      //   robotTaskCode: robotTaskCode,
-      //   cancelType: 'CANCEL'
-      // };
+      const params = {
+        robotTaskCode: robotTaskCode,
+        cancelType: 'CANCEL'
+      };
       
-      // try {
-      //   // 发送AGV指令
-      //   const res = await requestAgv.post(
-      //     '/rcs/rtas/api/robot/controller/task/cancel',
-      //     params
-      //   );
-      //   if (res.code === 'SUCCESS') {
-      //     uni.showToast({
-      //       title: 'AGV任务取消指令已发送',
-      //       icon: 'success'
-      //     });
-      //     // 成功时返回robotTaskCode
-      //     return res.data.robotTaskCode;
-      //   } else {
-      //     // 处理各种错误类型
-      //     let errorMsg = '';
-      //     switch (res.errorCode) {
-      //       case 'Err_TaskFinished':
-      //         errorMsg = '任务已结束';
-      //         break;
-      //       case 'Err_TaskNotFound':
-      //         errorMsg = '任务找不到';
-      //         break;
-      //       case 'Err_TaskModifyReject':
-      //         errorMsg = '任务当前无法变更';
-      //         break;
-      //       case 'Err_TaskTypeNotSupport':
-      //         errorMsg = '新任务任务类型不支持';
-      //         break;
-      //       case 'Err_RobotGroupsNotMatch':
-      //         errorMsg = '机器人资源组编号与新任务不匹配，无法调度';
-      //         break;
-      //       case 'Err_RobotCodesNotMatch':
-      //         errorMsg = '机器人编号与新任务不匹配，无法调度';
-      //         break;
-      //       default:
-      //         errorMsg = res.message || '未知错误';
-      //     }
-      //     uni.showToast({
-      //       title: errorMsg,
-      //       icon: 'none'
-      //     });
-      //     return '';
-      //   }
-      // } catch (err) {
-      //   console.error('发送AGV指令失败:', err);
-      //   uni.showToast({
-      //     title: '发送AGV取消指令失败',
-      //     icon: 'none'
-      //   });
-      //   return '';
-      // }
+      try {
+        // 发送AGV指令
+        const res = await requestAgv.post(
+          '/rcs/rtas/api/robot/controller/task/cancel',
+          params
+        );
+        if (res.code === 'SUCCESS') {
+          uni.showToast({
+            title: 'AGV任务取消指令已发送',
+            icon: 'success'
+          });
+          // 成功时返回robotTaskCode
+          return res.data.robotTaskCode;
+        } else {
+          // 处理各种错误类型
+          let errorMsg = '';
+          switch (res.errorCode) {
+            case 'Err_TaskFinished':
+              errorMsg = '任务已结束';
+              break;
+            case 'Err_TaskNotFound':
+              errorMsg = '任务找不到';
+              break;
+            case 'Err_TaskModifyReject':
+              errorMsg = '任务当前无法变更';
+              break;
+            case 'Err_TaskTypeNotSupport':
+              errorMsg = '新任务任务类型不支持';
+              break;
+            case 'Err_RobotGroupsNotMatch':
+              errorMsg = '机器人资源组编号与新任务不匹配，无法调度';
+              break;
+            case 'Err_RobotCodesNotMatch':
+              errorMsg = '机器人编号与新任务不匹配，无法调度';
+              break;
+            default:
+              errorMsg = res.message || '未知错误';
+          }
+          uni.showToast({
+            title: errorMsg,
+            icon: 'none'
+          });
+          return '';
+        }
+      } catch (err) {
+        console.error('发送AGV指令失败:', err);
+        uni.showToast({
+          title: '发送AGV取消指令失败',
+          icon: 'none'
+        });
+        return '';
+      }
     },
+    // --- 新增: AGV调度相关方法 ---
+    toggleAgvScheduleModal() {
+      this.showAgvScheduleModal = !this.showAgvScheduleModal;
+      if (!this.showAgvScheduleModal) {
+        // 重置状态和输入
+        this.agvScheduleData = {
+          startPosition: '',
+          endPosition: '',
+          status: 'idle'
+        };
+        // 关闭弹窗时刷新列表
+        this.fetchQueueData();
+      }
+    },
+
+    handleAgvScheduleInput(field, value) {
+      this.agvScheduleData[field] = value;
+    },
+    
+    // 循环执行/停止循环 (目前仅占位)
+    handleAgvModeChange(isStartCycle) {
+      if (!this.agvScheduleData.startPosition || !this.agvScheduleData.endPosition) {
+        uni.showToast({ title: '请先选择起点和终点', icon: 'none' });
+        return;
+      }
+      if (this.agvScheduleData.startPosition === this.agvScheduleData.endPosition) {
+        uni.showToast({ title: '起点和终点不能相同', icon: 'none' });
+        return;
+      }
+
+      if (isStartCycle) {
+        if (this.agvScheduleData.status === 'singleRunning') {
+          uni.showToast({ title: '当前正在单次执行，请等待完成后再开始循环', icon: 'none' });
+          return;
+        }
+        this.agvScheduleData.status = 'cycleRunning';
+        uni.showToast({ title: '循环执行已启动（功能开发中）', icon: 'none' });
+        // TODO: 实现循环逻辑, 参考FloorFirst.vue, 可能涉及定时器和状态检查
+      } else {
+        this.agvScheduleData.status = 'idle';
+        uni.showToast({ title: '循环执行已停止', icon: 'none' });
+        // TODO: 清理循环相关的定时器等
+      }
+    },
+
+    async handleSingleModeChange() {
+      if (!this.agvScheduleData.startPosition || !this.agvScheduleData.endPosition) {
+        uni.showToast({ title: '请先选择起点和终点', icon: 'none' });
+        return;
+      }
+      if (this.agvScheduleData.startPosition === this.agvScheduleData.endPosition) {
+        uni.showToast({ title: '起点和终点不能相同', icon: 'none' });
+        return;
+      }
+      if (this.agvScheduleData.status === 'cycleRunning') {
+        uni.showToast({ title: '当前正在循环执行，请先停止循环执行', icon: 'none' });
+        return;
+      }
+      
+      // PF-FMR-COMMON-JH	转盘-输送线，起点终点都与plc进行安全交互
+      // PF-FMR-COMMON-JH1 转盘-缓存区，只有起点与plc进行安全交互
+      // PF-FMR-COMMON-JH2 缓存区-输送线，只有终点与plc进行安全交互
+      // 判断起点类型
+      let taskType = '';
+      let fromSiteCode = '';
+      let toSiteCode = '';
+
+      const startPos = this.agvScheduleData.startPosition.trim().toUpperCase();
+      const endPos = this.agvScheduleData.endPosition.trim().toUpperCase();
+
+      if (startPos === 'AGV2-1') {
+        // 说明起点是转盘
+        fromSiteCode = this.agvCodeMap[startPos];
+
+        if (endPos.includes('AGV')) {
+          // 转盘-输送线，起点终点都与plc进行安全交互
+          // todo 这种方式先不处理占位问题
+          taskType = 'PF-FMR-COMMON-JH';
+          toSiteCode = this.agvCodeMap[endPos];
+          this.agvScheduleData.status = 'singleRunning';
+          // 调用发送AGV指令方法
+          this.sendAgvCommand(taskType, fromSiteCode, toSiteCode);
+        } else {
+          // 转盘-缓存区，只有起点与plc进行安全交互
+          taskType = 'PF-FMR-COMMON-JH1';
+          toSiteCode = endPos;
+          // 判断目的地缓存位有没有托盘占位，如果有直接报错提示，并返回
+          try {
+            const queueName = endPos.charAt(0);
+            const queueNum = endPos.substring(1);
+            const res = await request.post('/queue_info/queryQueueList', {
+              queueName,
+              queueNum
+            });
+            if (res.code === '200' && res.data && res.data.length > 0) {
+              if (res.data[0].trayInfo === null || res.data[0].trayInfo === '') {
+                this.agvScheduleData.status = 'singleRunning';
+                // 调用发送AGV指令方法
+                const robotTaskCode = await this.sendAgvCommand(
+                  taskType,
+                  fromSiteCode,
+                  toSiteCode
+                );
+                if (robotTaskCode !== '') {
+                  // 转盘-缓存区
+                  const param = {
+                    id: res.data[0].id,
+                    trayInfo: '1111111',
+                    trayStatus: '0',
+                    robotTaskCode,
+                    trayInfoAdd: '临时托盘'
+                  };
+                  request.post('/queue_info/update', param)
+                    .then((returnRes) => {
+                      if (returnRes.code === '200' && returnRes.data == 1) {
+                        console.log(`手动调度去往缓存区：${toSiteCode}成功！`);
+                        uni.showToast({
+                          title: `手动调度去往缓存区：${toSiteCode}成功！`,
+                          icon: 'success'
+                        });
+                      } else {
+                        console.log(`手动调度去往缓存区：${toSiteCode}失败！`);
+                        uni.showToast({
+                          title: `手动调度去往缓存区：${toSiteCode}失败！`,
+                          icon: 'none'
+                        });
+                      }
+                    })
+                    .catch((err) => {
+                      console.log(
+                        `手动调度去往缓存区：${toSiteCode}失败！${err}`
+                      );
+                      uni.showToast({
+                        title: `手动调度去往缓存区：${toSiteCode}失败！${err}`,
+                        icon: 'none'
+                      });
+                    });
+                }
+              } else {
+                uni.showToast({
+                  title: `目的地：${toSiteCode}缓存位有托盘占位，请检查。`,
+                  icon: 'none'
+                });
+                console.log(`目的地：${toSiteCode}缓存位有托盘占位，请检查。`);
+              }
+            } else {
+              console.log('没有此缓存区位置，请检查输入的缓存区位置是否正确');
+              uni.showToast({
+                title: '没有此缓存区位置，请检查输入的缓存区位置是否正确',
+                icon: 'none'
+              });
+            }
+          } catch (e) {
+            uni.showToast({
+              title: '检查目标缓存区异常',
+              icon: 'none'
+            });
+            this.agvScheduleData.status = 'idle';
+            return;
+          }
+        }
+      } else if (
+        startPos === 'AGV1-1' ||
+        startPos === 'AGV3-1'
+      ) {
+        // 说明起点是AGV1-1或AGV3-1
+        fromSiteCode = this.agvCodeMap[startPos];
+        if (
+          (startPos === 'AGV1-1' &&
+            endPos.includes('D')) ||
+          (startPos === 'AGV3-1' &&
+            endPos.includes('E'))
+        ) {
+          // AGV1-1-输送线，只有终点与plc进行安全交互
+          taskType = 'PF-FMR-COMMON-JH4';
+          toSiteCode = endPos;
+          this.agvScheduleData.status = 'singleRunning';
+          // 调用发送AGV指令方法
+          this.sendAgvCommand(taskType, fromSiteCode, toSiteCode);
+        } else {
+          // 目前没有这种类型，报错
+          taskType = 'ERROR';
+          console.log(
+            `${startPos}发送到${endPos}，没有这种任务类型，请检查！`
+          );
+          uni.showToast({
+            title: `${startPos}发送到${endPos}，没有这种任务类型，请检查！`,
+            icon: 'none'
+          });
+        }
+      } else {
+        // 说明起点是缓存区
+        fromSiteCode = startPos;
+        if (endPos.includes('AGV')) {
+          // 缓存区-输送线，只有终点与plc进行安全交互
+          taskType = 'PF-FMR-COMMON-JH2';
+          toSiteCode = this.agvCodeMap[endPos];
+          // 判断起点缓存位有没有托盘占位，如果没有直接报错提示，并返回
+          try {
+            const queueName = fromSiteCode.charAt(0);
+            const queueNum = fromSiteCode.substring(1);
+            const res = await request.post('/queue_info/queryQueueList', {
+              queueName,
+              queueNum
+            });
+            if (res.code === '200' && res.data && res.data.length > 0) {
+              if (res.data[0].trayInfo === null || res.data[0].trayInfo === '') {
+                console.log(`起点：${fromSiteCode}没有信息，请扫码录入信息。`);
+                uni.showToast({
+                  title: `起点：${fromSiteCode}没有信息，请扫码录入信息。`,
+                  icon: 'none'
+                });
+              } else {
+                this.agvScheduleData.status = 'singleRunning';
+                // 调用发送AGV指令方法
+                const robotTaskCode = await this.sendAgvCommand(
+                  taskType,
+                  fromSiteCode,
+                  toSiteCode
+                );
+                if (robotTaskCode !== '') {
+                  // 缓存区-输送线
+                  const param = {
+                    id: res.data[0].id,
+                    trayStatus: '3', // -在缓存区等待AGV取货
+                    robotTaskCode,
+                    targetPosition: endPos // 保存目的地信息
+                  };
+                  request.post('/queue_info/update', param)
+                    .then((returnRes) => {
+                      if (returnRes.code === '200' && returnRes.data == 1) {
+                        console.log(
+                          `从${fromSiteCode}手动调度去往${toSiteCode}成功！`
+                        );
+                        uni.showToast({
+                          title: `从${fromSiteCode}手动调度去往${toSiteCode}成功！`,
+                          icon: 'success'
+                        });
+                      } else {
+                        console.log(`手动调度去往缓存区：${toSiteCode}失败！`);
+                        uni.showToast({
+                          title: `手动调度去往缓存区：${toSiteCode}失败！`,
+                          icon: 'none'
+                        });
+                      }
+                    })
+                    .catch((err) => {
+                      console.log(
+                        `手动调度去往缓存区：${toSiteCode}失败！${err}`
+                      );
+                      uni.showToast({
+                        title: `手动调度去往缓存区：${toSiteCode}失败！${err}`,
+                        icon: 'none'
+                      });
+                    });
+                }
+              }
+            } else {
+              uni.showToast({
+                title: '未查到此起点信息，请检查输入的缓存区位置是否正确',
+                icon: 'none'
+              });
+              console.log('未查到此起点信息，请检查输入的缓存区位置是否正确');
+            }
+          } catch (e) {
+            uni.showToast({
+              title: '检查起点缓存区异常',
+              icon: 'none'
+            });
+            this.agvScheduleData.status = 'idle';
+            return;
+          }
+        } else {
+          // 缓存区-缓存区
+          taskType = 'PF-FMR-COMMON-PY';
+          toSiteCode = endPos;
+          // 判断目的地缓存位有没有托盘占位，如果有直接报错提示，并返回
+          try {
+            const queueName = toSiteCode.charAt(0);
+            const queueNum = toSiteCode.substring(1);
+            const res = await request.post('/queue_info/queryQueueList', {
+              queueName,
+              queueNum
+            });
+            if (res.code === '200' && res.data && res.data.length > 0) {
+              if (res.data[0].trayInfo) {
+                uni.showToast({
+                  title: `目的地：${toSiteCode}缓存位有托盘占位，请检查。`,
+                  icon: 'none'
+                });
+                console.log(`目的地：${toSiteCode}缓存位有托盘占位，请检查。`);
+                return;
+              }
+              
+              // 检查起点缓存区是否有货
+              const queueNameSource = fromSiteCode.charAt(0);
+              const queueNumSource = fromSiteCode.substring(1);
+              const resSource = await request.post('/queue_info/queryQueueList', { 
+                queueName: queueNameSource, 
+                queueNum: queueNumSource 
+              });
+              
+              if (resSource.code === '200' && resSource.data && resSource.data.length > 0) {
+                if (!resSource.data[0].trayInfo) {
+                  uni.showToast({ 
+                    title: `起点缓存区 ${fromSiteCode} 无托盘`, 
+                    icon: 'none' 
+                  });
+                  this.agvScheduleData.status = 'idle';
+                  return;
+                }
+                // 有托盘，可以执行
+                this.agvScheduleData.status = 'singleRunning';
+                // 调用发送AGV指令方法
+                this.sendAgvCommand(taskType, fromSiteCode, toSiteCode);
+              } else {
+                uni.showToast({ 
+                  title: `查询起点缓存区 ${fromSiteCode} 失败或不存在`, 
+                  icon: 'none' 
+                });
+                this.agvScheduleData.status = 'idle';
+                return;
+              }
+            } else {
+              uni.showToast({
+                title: '没有此缓存区位置，请检查输入的缓存区位置是否正确',
+                icon: 'none'
+              });
+              console.log('没有此缓存区位置，请检查输入的缓存区位置是否正确');
+              this.agvScheduleData.status = 'idle';
+            }
+          } catch (e) {
+            uni.showToast({
+              title: '检查缓存区异常',
+              icon: 'none'
+            });
+            this.agvScheduleData.status = 'idle';
+            return;
+          }
+        }
+      }
+    }
   }
 }
 </script>
@@ -1624,6 +2055,15 @@ export default {
     }
   }
 
+  // 新增AGV调度悬浮按钮样式
+  .agv-schedule-fab {
+    bottom: 220rpx; // 调整位置，使其不与原按钮重叠
+    background-color: #10b981; // 不同颜色以区分
+     &:active {
+      background-color: #059669;
+    }
+  }
+
   // AGV任务管理弹窗样式
   .agv-task-modal-content {
     width: 90%;
@@ -1873,5 +2313,97 @@ export default {
         }
       }
     }
+
+  // 新增: AGV调度模态框样式
+  .agv-schedule-modal-content {
+    width: 90%;
+    max-width: 700rpx;
+    background: #ffffff; // 使用纯白背景，更简洁
+    border-radius: 24rpx; // 增大圆角
+    overflow: hidden;
+    box-shadow: 0 8rpx 30rpx rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(80vh - 60rpx); // 调整高度，留出更多空间
+    padding: 40rpx; // 统一内边距
+    box-sizing: border-box;
+
+    .agv-schedule-modal-header {
+      font-size: 36rpx; // 增大标题字号
+      font-weight: 600;
+      color: #1f2937;
+      text-align: center;
+      margin-bottom: 40rpx; // 增大与内容区的间距
+    }
+
+    .agv-schedule-modal-body {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 30rpx; // 增大输入组之间的间距
+
+      .schedule-input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 12rpx; // 标签与输入框的间距
+        
+        .schedule-label {
+          font-size: 30rpx; // 增大标签字号
+          color: #374151;
+        }
+        .schedule-input {
+          border: 1px solid #d1d5db;
+          border-radius: 12rpx; // 增大输入框圆角
+          padding: 24rpx 24rpx; // 调整内边距，使文字更居中，避免遮挡
+          font-size: 30rpx; // 增大输入文字字号
+          width: 100%;
+          box-sizing: border-box;
+          height: 90rpx; // 固定高度以保证视觉一致性
+          line-height: normal; // 确保文字垂直居中，对于input，通常normal即可
+        }
+      }
+    }
+
+    .agv-schedule-modal-footer {
+      display: flex;
+      flex-direction: column; 
+      margin-top: 40rpx; // 增大与内容区的间距
+
+      .schedule-btn {
+        // flex: 1; // 移除flex:1, 让按钮根据内容自适应宽度，若要等宽，需其他方式
+        text-align: center;
+        padding: 28rpx 0; // 增大按钮垂直内边距
+        font-size: 32rpx; // 增大按钮文字字号
+        font-weight: 500;
+        border-radius: 12rpx; // 增大按钮圆角
+        color: #fff;
+        margin-bottom: 24rpx; // 使用 margin-bottom 实现间距
+
+        &:last-child {
+          margin-bottom: 0; // 最后一个按钮移除下外边距
+        }
+
+        &.single-exec-btn {
+          background: #2563eb;
+          &:active { background: #1d4ed8; }
+        }
+        
+        &.cycle-exec-btn {
+          background: #f59e0b; 
+          &:active { background: #d97706; }
+        }
+        
+        &.stop-cycle-btn {
+           background: #ef4444; 
+           &:active { background: #dc2626; }
+        }
+
+        &.close-btn {
+          background: #6b7280; 
+           &:active { background: #4b5563; }
+        }
+      }
+    }
+  }
 }
 </style> 
