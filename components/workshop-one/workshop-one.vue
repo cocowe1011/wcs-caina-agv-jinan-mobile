@@ -26,7 +26,7 @@
       </view>
       
       <!-- 加载指示器 -->
-      <view class="loading-container" v-if="loading">
+      <view class="loading-container" v-show="loading">
         <view class="loading-spinner"></view>
         <text class="loading-text">加载中...</text>
       </view>
@@ -61,7 +61,7 @@
                 <text class="info-label">托盘码</text>
                 <text class="info-value" v-if="item.trayInfo">{{ item.trayInfo }}</text>
                 <view class="scan-add-btn" v-else @click="scanToAddWasteTray(item)">
-                  <text class="scan-btn-text">扫码添加废料托盘</text>
+                  <text class="scan-btn-text">扫码添加临时托盘</text>
                 </view>
               </view>
               <view class="info-item">
@@ -136,6 +136,104 @@
         </view>
       </view>
     </view>
+
+    <!-- AGV任务管理悬浮按钮 -->
+    <view class="fab-btn" @click="toggleAgvTaskModal">
+      <text class="fab-text">AGV</text>
+      <text class="fab-text">任务</text>
+    </view>
+
+    <!-- AGV运行中任务管理弹窗 -->
+    <view class="modal-overlay" v-if="showAgvTaskModal" @click="toggleAgvTaskModal">
+      <view class="agv-task-modal-content" @click.stop>
+        <view class="agv-task-modal-header">
+          <view class="agv-task-modal-tabs">
+            <view 
+              class="agv-task-tab-item" 
+              :class="{'active': currentAgvTaskTab === 'floor1'}" 
+              @click="switchAgvTaskTab('floor1')">
+              一层AGV运行中任务管理
+            </view>
+            <view 
+              class="agv-task-tab-item" 
+              :class="{'active': currentAgvTaskTab === 'floor2'}" 
+              @click="switchAgvTaskTab('floor2')">
+              二层AGV运行中任务管理
+            </view>
+            <view 
+              class="agv-task-tab-item" 
+              :class="{'active': currentAgvTaskTab === 'floor3'}" 
+              @click="switchAgvTaskTab('floor3')">
+              三层AGV运行中任务管理
+            </view>
+          </view>
+          <view class="agv-task-refresh-btn" @click="fetchAgvTasks">
+            <text class="refresh-text">刷新</text>
+          </view>
+        </view>
+        
+        <!-- 刷新状态条 -->
+        <view class="refresh-status-bar" v-if="agvTasksLoading">
+          <view class="loading-spinner small-spinner"></view>
+          <text class="refresh-status-text">数据更新中...</text>
+        </view>
+        
+        <view class="agv-task-modal-body">
+          <scroll-view scroll-y="true" class="agv-task-list">
+            <view class="agv-task-list-inner-content">
+              <!-- 空状态提示 -->
+              <view class="empty-state modal-empty-state" v-if="!agvTasksLoading && displayedAgvTasks.length === 0">
+                <text class="empty-text">暂无运行中任务</text>
+              </view>
+
+              <!-- 任务列表 -->
+              <view v-if="displayedAgvTasks.length > 0">
+                <view 
+                  v-for="task in displayedAgvTasks" 
+                  :key="task.id" 
+                  class="agv-task-card"
+                >
+                  <view class="agv-task-card-row">
+                    <text class="agv-task-label">队列位置:</text>
+                    <text class="agv-task-value">{{ task.queueName }}{{ task.queueNum }}</text>
+                  </view>
+                  <view class="agv-task-card-row">
+                    <text class="agv-task-label">托盘号:</text>
+                    <text class="agv-task-value">{{ task.trayInfo || '--' }}</text>
+                  </view>
+                  <view class="agv-task-card-row">
+                    <text class="agv-task-label">产品描述:</text>
+                    <text class="agv-task-value product-name">{{ task.trayInfoAdd || '--' }}</text>
+                  </view>
+                  <view class="agv-task-card-row">
+                    <text class="agv-task-label">任务号:</text>
+                    <text class="agv-task-value">{{ task.robotTaskCode || '--' }}</text>
+                  </view>
+                  <view class="agv-task-card-row">
+                    <text class="agv-task-label">当前状态:</text>
+                    <text class="agv-task-value status-text" :class="getAgvStatusClass(task.trayStatus)">{{ getAgvTaskStatusText(task.trayStatus) }}</text>
+                  </view>
+                  <view class="agv-task-card-row action-row">
+                    <text class="agv-task-label">操作:</text>
+                    <view class="agv-task-actions">
+                      <text v-if="task.isWaitCancel === '1'" class="waiting-cancel-text">正在等待取消执行</text>
+                      <view v-else class="cancel-task-btn" @click="confirmCancelAgvTask(task)">
+                        取消执行
+                      </view>
+                    </view>
+                  </view>
+                </view>
+                <!-- Add a spacer view after all cards -->
+                <view class="scroll-bottom-spacer"></view>
+              </view>
+            </view>
+          </scroll-view>
+        </view>
+         <view class="modal-footer">
+            <view class="modal-btn confirm" @click="toggleAgvTaskModal">关闭</view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -163,13 +261,43 @@ export default {
       showMoveModal: false,
       currentPallet: null,
       selectedPosition: '',
-      availablePositions: []
+      availablePositions: [],
+      // AGV任务管理相关
+      showAgvTaskModal: false,
+      currentAgvTaskTab: 'floor1', // Default tab: 'floor1', 'floor2', 'floor3'
+      allAgvTasks: [], 
+      agvTasksLoading: false,
     }
   },
   computed: {
     currentQueueData() {
       const code = this.tabs[this.currentTab].code;
       return this.queueData[code] || [];
+    },
+    displayedAgvTasks() {
+      if (!this.allAgvTasks || this.allAgvTasks.length === 0) return [];
+      
+      const runningStatuses = ['0', '1', '3', '4', '6', '7'];
+      const activeTasks = this.allAgvTasks.filter(task => 
+        task && task.id && task.trayInfo && runningStatuses.includes(task.trayStatus)
+      );
+
+      let floorTasks = [];
+
+      if (this.currentAgvTaskTab === 'floor1') {
+        floorTasks = activeTasks.filter(task => 
+          task.queueName === 'AGV2-2' && ['6', '7'].includes(task.trayStatus)
+        );
+      } else if (this.currentAgvTaskTab === 'floor2') {
+        floorTasks = activeTasks.filter(task => 
+          ['0', '1', '3', '4'].includes(task.trayStatus)
+        );
+      } else if (this.currentAgvTaskTab === 'floor3') {
+        floorTasks = activeTasks.filter(task => 
+          task.queueName === 'AGV3-1' || (task.targetPosition && task.targetPosition.includes('三楼'))
+        );
+      }
+      return floorTasks;
     }
   },
   created() {
@@ -413,7 +541,7 @@ export default {
       this.$set(item, 'destination', '');
     },
     
-    // 扫码添加废料托盘功能
+    // 扫码添加临时托盘功能
     scanToAddWasteTray(item) {
       // 调用扫码API
       uni.scanCode({
@@ -430,7 +558,7 @@ export default {
       });
     },
     
-    // 更新为废料托盘
+    // 更新为临时托盘
     updateToWasteTray(item, scanResult) {
       this.loading = true;
       
@@ -438,27 +566,27 @@ export default {
         id: item.id,
         trayInfo: scanResult, // 使用扫码得到的条码作为trayInfo
         trayStatus: '2',
-        trayInfoAdd: '废料托盘'
+        trayInfoAdd: '临时托盘'
       };
       
       request.post('/queue_info/update', param)
         .then(res => {
           if (res.code === '200' && res.data == 1) {
             uni.showToast({
-              title: '废料托盘添加成功',
+              title: '临时托盘添加成功',
               icon: 'success'
             });
             
             // 更新本地数据
             this.$set(item, 'trayInfo', scanResult); // 使用扫码结果
             this.$set(item, 'trayStatus', '2');
-            this.$set(item, 'trayInfoAdd', '废料托盘');
+            this.$set(item, 'trayInfoAdd', '临时托盘');
             
             // 重新加载当前区域数据
             this.fetchQueueData();
           } else {
             uni.showToast({
-              title: '废料托盘添加失败',
+              title: '临时托盘添加失败',
               icon: 'none'
             });
           }
@@ -753,7 +881,178 @@ export default {
         .finally(() => {
           this.loading = false;
         });
-    }
+    },
+
+    // --- AGV任务管理方法 ---
+    toggleAgvTaskModal() {
+      this.showAgvTaskModal = !this.showAgvTaskModal;
+      if (this.showAgvTaskModal) {
+        this.currentAgvTaskTab = 'floor1'; // 重置到默认tab
+        this.fetchAgvTasks(); 
+      }
+    },
+    switchAgvTaskTab(tabName) {
+      this.currentAgvTaskTab = tabName;
+      // displayedAgvTasks 会自动更新
+    },
+    async fetchAgvTasks() {
+      this.agvTasksLoading = true;
+      try {
+        const res = await request.post('/queue_info/queryQueueList', {});
+        if (res.code === '200' && Array.isArray(res.data)) {
+
+          // 更新数据
+          this.allAgvTasks = res.data;
+          
+          // 使用nextTick确保DOM更新后
+          this.$nextTick(() => {
+            setTimeout(() => {
+              this.agvTasksLoading = false;
+            }, 300);
+          });
+        } else {
+          this.allAgvTasks = [];
+          uni.showToast({ title: '获取AGV任务列表失败' + (res.msg ? ': ' + res.msg : ''), icon: 'none' });
+          this.agvTasksLoading = false;
+        }
+      } catch (err) {
+        this.allAgvTasks = [];
+        uni.showToast({ title: '网络请求AGV任务失败', icon: 'none' });
+        console.error('获取AGV任务列表失败:', err);
+        this.agvTasksLoading = false;
+      }
+    },
+    getAgvTaskStatusText(status) {
+      const statusMap = {
+        '0': '在2800等待AGV取货',
+        '1': '已在2800取货，正往缓存区运送',
+        '3': '在缓存区等待AGV取货',
+        '4': '已在缓存区取货，正往运往目的地',
+        '6': '等待一楼AGV取货',
+        '7': 'AGV已在一楼AGV1-1取货，正运往目的地'
+      };
+      return statusMap[status] || `未知状态 (${status})`;
+    },
+    getAgvStatusClass(status) {
+        // 与主列表状态样式保持一致或自定义
+        switch(status) {
+            case '0': return 'status-waiting'; // 在2800等待AGV取货
+            case '1': return 'status-moving';  // 已在2800取货，正往缓存区运送
+            case '3': return 'status-waiting'; // 在缓存区等待AGV取货
+            case '4': return 'status-moving';  // 已在缓存区取货，正往运往目的地
+            case '6': return 'status-waiting'; // 等待一楼AGV取货
+            case '7': return 'status-moving';  // AGV已在一楼AGV1-1取货，正运往目的地
+            default: return '';
+        }
+    },
+    confirmCancelAgvTask(task) {
+        uni.showModal({
+            title: '确认取消任务',
+            content: `确定要取消托盘 ${task.trayInfo || '未知'} 的AGV任务吗？`,
+            success: async (res) => {
+                if (res.confirm) {
+                    await this.executeCancelAgvTask(task);
+                }
+            }
+        });
+    },
+    async executeCancelAgvTask(task) {
+      if (!task || !task.id) {
+        uni.showToast({ title: '任务信息错误', icon: 'none' });
+        return;
+      }
+      this.agvTasksLoading = true;
+      
+      const robotTaskCode = await this.sendCancelAgvCommand(task.robotTaskCode, task.trayInfo);
+      if (robotTaskCode !== '') {
+        // 调用取消AGV任务的API
+        request.post('/queue_info/update', {
+          id: task.id,
+          isWaitCancel: '1'
+        })
+          .then((res) => {
+            if (res.code === '200' && res.data == 1) {
+              uni.showToast({ title: '任务取消请求已发送', icon: 'success' });
+              // 刷新任务列表
+              this.fetchAgvTasks();
+            } else {
+              uni.showToast({ title: '任务取消请求失败', icon: 'none' });
+              this.agvTasksLoading = false;
+            }
+          })
+          .catch((err) => {
+            console.error('取消AGV任务失败:', err);
+            uni.showToast({ title: '取消AGV任务失败', icon: 'none' });
+            this.agvTasksLoading = false;
+          });
+      } else {
+        this.agvTasksLoading = false;
+      }
+    },
+    
+    // 发送AGV取消任务指令
+    async sendCancelAgvCommand(robotTaskCode, trayInfo) {
+      // 测试用，返回当前时间戳
+      return Date.now().toString();
+      // 组装入参
+      // const params = {
+      //   robotTaskCode: robotTaskCode,
+      //   cancelType: 'CANCEL'
+      // };
+      
+      // try {
+      //   // 发送AGV指令
+      //   const res = await requestAgv.post(
+      //     '/rcs/rtas/api/robot/controller/task/cancel',
+      //     params
+      //   );
+      //   if (res.code === 'SUCCESS') {
+      //     uni.showToast({
+      //       title: 'AGV任务取消指令已发送',
+      //       icon: 'success'
+      //     });
+      //     // 成功时返回robotTaskCode
+      //     return res.data.robotTaskCode;
+      //   } else {
+      //     // 处理各种错误类型
+      //     let errorMsg = '';
+      //     switch (res.errorCode) {
+      //       case 'Err_TaskFinished':
+      //         errorMsg = '任务已结束';
+      //         break;
+      //       case 'Err_TaskNotFound':
+      //         errorMsg = '任务找不到';
+      //         break;
+      //       case 'Err_TaskModifyReject':
+      //         errorMsg = '任务当前无法变更';
+      //         break;
+      //       case 'Err_TaskTypeNotSupport':
+      //         errorMsg = '新任务任务类型不支持';
+      //         break;
+      //       case 'Err_RobotGroupsNotMatch':
+      //         errorMsg = '机器人资源组编号与新任务不匹配，无法调度';
+      //         break;
+      //       case 'Err_RobotCodesNotMatch':
+      //         errorMsg = '机器人编号与新任务不匹配，无法调度';
+      //         break;
+      //       default:
+      //         errorMsg = res.message || '未知错误';
+      //     }
+      //     uni.showToast({
+      //       title: errorMsg,
+      //       icon: 'none'
+      //     });
+      //     return '';
+      //   }
+      // } catch (err) {
+      //   console.error('发送AGV指令失败:', err);
+      //   uni.showToast({
+      //     title: '发送AGV取消指令失败',
+      //     icon: 'none'
+      //   });
+      //   return '';
+      // }
+    },
   }
 }
 </script>
@@ -1166,7 +1465,9 @@ export default {
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    
+    padding-top: 60rpx;
+    box-sizing: border-box;
+
     .modal-content {
       width: 90%;
       max-width: 650rpx;
@@ -1295,5 +1596,282 @@ export default {
       }
     }
   }
+
+  // AGV任务管理悬浮按钮样式
+  .fab-btn {
+    position: fixed;
+    right: 30rpx;
+    bottom: 100rpx;
+    width: 100rpx;
+    height: 100rpx;
+    background-color: #2563eb;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.2);
+    z-index: 999;
+    color: #fff;
+    font-size: 22rpx;
+
+    .fab-text {
+      line-height: 1.2;
+    }
+
+    &:active {
+      background-color: #1d4ed8;
+    }
+  }
+
+  // AGV任务管理弹窗样式
+  .agv-task-modal-content {
+    width: 90%;
+    max-width: 700rpx;
+    background: #fff;
+    border-radius: 16rpx;
+    overflow: hidden;
+    box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(80vh - 60rpx);
+  }
+
+  .agv-task-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20rpx 24rpx;
+    border-bottom: 1px solid #f3f4f6;
+  }
+
+  .agv-task-modal-tabs {
+    display: flex;
+    gap: 16rpx;
+    flex-grow: 1;
+
+    .agv-task-tab-item {
+      padding: 12rpx 16rpx;
+      font-size: 26rpx;
+      color: #666;
+      border-radius: 8rpx;
+      transition: all 0.2s ease;
+
+      &.active {
+        color: #2563eb;
+        background: rgba(37, 99, 235, 0.1);
+        font-weight: 500;
+      }
+      &:active {
+        background: rgba(0,0,0,0.05);
+      }
+    }
+  }
+
+  .agv-task-refresh-btn {
+    padding: 10rpx 20rpx;
+    background-color: #2563eb;
+    color: white;
+    border-radius: 8rpx;
+    font-size: 24rpx;
+    margin-left: 16rpx;
+
+    .refresh-text.refreshing {
+      opacity: 0.7;
+    }
+     &:active {
+      background-color: #1d4ed8;
+    }
+  }
+  
+  /* 刷新状态条样式 */
+  .refresh-status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #eff6ff;
+    padding: 10rpx 0;
+    border-bottom: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    font-size: 24rpx;
+  }
+  
+  .refresh-status-text {
+    margin-left: 10rpx;
+  }
+  
+  .small-spinner {
+    width: 30rpx;
+    height: 30rpx;
+    border-width: 3rpx;
+  }
+
+  .agv-task-modal-body {
+    height: calc(80vh - 220rpx); // 80vh (parent) - approx header & footer height (e.g. 100rpx + 120rpx)
+    overflow-y: hidden; 
+    display: flex; 
+    flex-direction: column;
+  }
+
+  .agv-task-list {
+    height: 100%;
+  }
+  
+  .agv-task-list-inner-content {
+    padding: 24rpx; 
+    padding-bottom: 48rpx;
+    background-color: #f7f8fa;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+  }
+
+  .scroll-bottom-spacer {
+    height: 70rpx;
+    flex-shrink: 0;
+  }
+
+  .modal-loading-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    background-color: rgba(255, 255, 255, 0.9);
+    border-radius: 12rpx;
+    padding: 20rpx 40rpx;
+    box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+  }
+  
+  .modal-empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .agv-task-card {
+    background-color: #ffffff;
+    border-radius: 16rpx;
+    padding: 28rpx;
+    margin-bottom: 24rpx;
+    box-shadow: 0 6rpx 18rpx rgba(0, 0, 0, 0.06);
+    border: 1px solid #eef2f7;
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    .agv-task-card-row {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 18rpx;
+      font-size: 28rpx;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+
+      .agv-task-label {
+        color: #8896b3;
+        width: 160rpx;
+        flex-shrink: 0;
+        font-weight: 400;
+      }
+
+      .agv-task-value {
+        color: #344054;
+        flex: 1;
+        word-break: break-all;
+        font-weight: 500;
+        line-height: 1.5;
+         
+        &.product-name { 
+            color: #1d2939;
+            line-height: 1.4;
+        }
+      }
+       .status-text { 
+            padding: 4rpx 12rpx;
+            border-radius: 20rpx;
+            font-size: 24rpx;
+            font-weight: 500;
+            display: inline-block;
+
+            &.status-waiting { 
+              color: #c27803; 
+              background-color: #fffbeb; 
+              border: 1px solid #fde68a;
+            }
+            &.status-moving { 
+              color: #1d4ed8; 
+              background-color: #eff6ff; 
+              border: 1px solid #bfdbfe;
+            }
+        }
+    }
+
+    .action-row {
+      align-items: center;
+      margin-top: 24rpx;
+      padding-top: 20rpx;
+      border-top: 1px dashed #dde4ee;
+    }
+    
+    .agv-task-actions {
+      flex: 1;
+      display: flex;
+      justify-content: flex-start; 
+    }
+
+    .waiting-cancel-text {
+      color: #b91c1c;
+      font-size: 26rpx;
+      font-style: normal;
+      font-weight: 500;
+      padding: 10rpx 0;
+    }
+
+    .cancel-task-btn {
+      background-color: #fee2e2;
+      color: #b91c1c;
+      padding: 12rpx 24rpx;
+      border-radius: 8rpx;
+      font-size: 26rpx;
+      font-weight: 500;
+      border: 1px solid #fecaca;
+      transition: background-color 0.2s ease, color 0.2s ease;
+
+      &:active {
+        background-color: #fecaca;
+        color: #991b1b;
+      }
+    }
+  }
+   .modal-footer {
+      display: flex;
+      padding: 24rpx;
+      border-top: 1px solid #f3f4f6;
+      
+      .modal-btn {
+        flex: 1;
+        text-align: center;
+        padding: 20rpx 0;
+        font-size: 28rpx;
+        font-weight: 500;
+        border-radius: 8rpx;
+        
+        &.confirm {
+          background: #2563eb;
+          color: #fff;
+          
+          &:active {
+            background: #1d4ed8;
+          }
+        }
+      }
+    }
 }
 </style> 
