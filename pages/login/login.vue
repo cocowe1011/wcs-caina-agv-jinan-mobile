@@ -11,7 +11,7 @@
     <view class="login-content">
       <view class="login-header">
         <image class="logo" src="/static/images/logo.png" mode="aspectFit"></image>
-        <text class="title">移动WCS管理系统</text>
+        <text class="title" @longpress="showConfigDialog">移动WCS管理系统</text>
         <text class="subtitle">Intelligent Workshop Management</text>
       </view>
       
@@ -51,6 +51,60 @@
       
       <view class="login-footer">
         <text class="version">Version 1.0.0</text>
+        <text class="workshop-info" v-if="currentWorkshop">当前车间：{{ currentWorkshop }}</text>
+      </view>
+    </view>
+    
+    <!-- 配置弹窗 -->
+    <view class="config-modal" v-if="showConfig">
+      <view class="config-content">
+        <view class="config-header">
+          <text class="config-title">系统配置</text>
+          <text class="config-close" @tap="hideConfigDialog">✕</text>
+        </view>
+        
+        <view class="config-form">
+          <view class="config-item">
+            <text class="config-label">管理员密码:</text>
+            <input 
+              class="config-input" 
+              v-model="configPassword" 
+              type="password" 
+              placeholder="请输入管理员密码"
+            />
+          </view>
+          
+          <view class="config-item" v-if="isConfigAuthed">
+            <text class="config-label">选择车间:</text>
+            <view class="workshop-options">
+              <view
+                class="workshop-option"
+                :class="{ active: selectedWorkshop === '2800车间' }"
+                @tap="selectWorkshop('2800车间')"
+              >
+                <text>2800车间</text>
+              </view>
+              <view
+                class="workshop-option"
+                :class="{ active: selectedWorkshop === '2500车间' }"
+                @tap="selectWorkshop('2500车间')"
+              >
+                <text>2500车间</text>
+              </view>
+            </view>
+          </view>
+        </view>
+        
+        <view class="config-actions">
+          <button class="config-btn cancel-btn" @tap="hideConfigDialog">取消</button>
+          <button 
+            class="config-btn confirm-btn" 
+            @tap="saveConfig"
+            :disabled="!configPassword"
+          >
+            {{ isConfigAuthed ? '保存配置' : '验证密码' }}
+          </button>
+        </view>
       </view>
     </view>
     
@@ -76,10 +130,90 @@ export default {
     return {
       username: 'test',
       password: '1',
-      loading: false
+      loading: false,
+      // 配置相关
+      showConfig: false,
+      configPassword: '',
+      isConfigAuthed: false,
+      selectedWorkshop: '',
+      currentWorkshop: ''
     }
   },
+  
+  onLoad() {
+    // 页面加载时读取本地配置
+    this.loadConfig()
+  },
+  
   methods: {
+    // 加载本地配置
+    loadConfig() {
+      try {
+        const workshop = uni.getStorageSync('workshop_config')
+        if (workshop) {
+          this.currentWorkshop = workshop
+        }
+      } catch (error) {
+        console.error('读取配置失败:', error)
+      }
+    },
+    
+    // 显示配置弹窗
+    showConfigDialog() {
+      this.showConfig = true
+      this.configPassword = ''
+      this.isConfigAuthed = false
+      this.selectedWorkshop = this.currentWorkshop || '2800车间'
+    },
+    
+    // 隐藏配置弹窗
+    hideConfigDialog() {
+      this.showConfig = false
+      this.configPassword = ''
+      this.isConfigAuthed = false
+    },
+    
+    // 选择车间
+    selectWorkshop(workshop) {
+      this.selectedWorkshop = workshop
+    },
+    
+    // 保存配置
+    saveConfig() {
+      if (!this.isConfigAuthed) {
+        // 验证管理员密码
+        if (this.configPassword === 'wcs-admin') {
+          this.isConfigAuthed = true
+          uni.showToast({
+            title: '密码验证成功',
+            icon: 'success'
+          })
+        } else {
+          uni.showToast({
+            title: '密码错误',
+            icon: 'error'
+          })
+        }
+        return
+      }
+      
+      // 保存配置到本地
+      try {
+        uni.setStorageSync('workshop_config', this.selectedWorkshop)
+        this.currentWorkshop = this.selectedWorkshop
+        this.hideConfigDialog()
+        uni.showToast({
+          title: '配置保存成功',
+          icon: 'success'
+        })
+      } catch (error) {
+        uni.showToast({
+          title: '配置保存失败',
+          icon: 'error'
+        })
+      }
+    },
+    
     async handleLogin() {
       if (!this.username || !this.password) {
         uni.showToast({
@@ -89,14 +223,26 @@ export default {
         return
       }
       
+      // 检查是否已配置车间
+      if (!this.currentWorkshop) {
+        uni.showModal({
+          title: '提示',
+          content: '请先配置车间信息\n长按标题可进入配置页面',
+          showCancel: false,
+          confirmText: '知道了'
+        })
+        return
+      }
+      
       this.loading = true
       try {
         // 模拟登录请求
         await new Promise(resolve => setTimeout(resolve, 1000))
         
-        // 保存登录状态
+        // 保存登录状态和车间配置
         uni.setStorageSync('token', 'demo_token')
         uni.setStorageSync('username', this.username)
+        uni.setStorageSync('current_workshop', this.currentWorkshop)
         
         // 跳转到首页
         uni.reLaunch({
@@ -147,6 +293,8 @@ export default {
         color: #fff;
         font-weight: bold;
         margin-bottom: 10rpx;
+        user-select: none;
+        cursor: pointer;
       }
       
       .subtitle {
@@ -242,6 +390,138 @@ export default {
       .version {
         font-size: 24rpx;
         color: rgba(255,255,255,0.4);
+        display: block;
+        margin-bottom: 10rpx;
+      }
+      
+      .workshop-info {
+        font-size: 22rpx;
+        color: rgba(255,255,255,0.6);
+        display: block;
+      }
+    }
+  }
+  
+  // 配置弹窗样式
+  .config-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    
+    .config-content {
+      width: 80%;
+      max-width: 500rpx;
+      background: #fff;
+      border-radius: 16rpx;
+      overflow: hidden;
+      
+      .config-header {
+        background: linear-gradient(90deg, #1a2a6c, #b21f1f);
+        color: #fff;
+        padding: 30rpx;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        
+        .config-title {
+          font-size: 36rpx;
+          font-weight: bold;
+        }
+        
+        .config-close {
+          font-size: 40rpx;
+          cursor: pointer;
+        }
+      }
+      
+      .config-form {
+        padding: 40rpx 30rpx;
+        
+        .config-item {
+          margin-bottom: 30rpx;
+          
+          .config-label {
+            font-size: 28rpx;
+            color: #333;
+            margin-bottom: 15rpx;
+            display: block;
+          }
+          
+          .config-input {
+            width: 100%;
+            height: 80rpx;
+            border: 2rpx solid #e0e0e0;
+            border-radius: 8rpx;
+            padding: 0 20rpx;
+            font-size: 30rpx;
+            color: #333;
+            box-sizing: border-box;
+            
+            &:focus {
+              border-color: #1a2a6c;
+            }
+          }
+          
+          .workshop-options {
+            display: flex;
+            gap: 20rpx;
+            
+            .workshop-option {
+              flex: 1;
+              height: 80rpx;
+              border: 2rpx solid #e0e0e0;
+              border-radius: 8rpx;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 28rpx;
+              color: #666;
+              cursor: pointer;
+              
+              &.active {
+                border-color: #1a2a6c;
+                background: #1a2a6c;
+                color: #fff;
+              }
+            }
+          }
+        }
+      }
+      
+              .config-actions {
+          padding: 0 30rpx 30rpx;
+          display: flex;
+          justify-content: space-between;
+          
+          .config-btn {
+            width: 45%;
+            height: 80rpx;
+            border-radius: 8rpx;
+            font-size: 30rpx;
+            border: none;
+          
+          &.cancel-btn {
+            background: #f5f5f5;
+            color: #666;
+          }
+          
+          &.confirm-btn {
+            background: linear-gradient(90deg, #1a2a6c, #b21f1f);
+            color: #fff;
+            
+            &:disabled {
+              opacity: 0.6;
+              pointer-events: none;
+            }
+          }
+        }
       }
     }
   }

@@ -379,7 +379,7 @@ export default {
         );
       } else if (this.currentAgvTaskTab === 'floor3') {
         floorTasks = activeTasks.filter(task => 
-          task.queueName === 'AGV3-1' || (task.targetPosition && task.targetPosition.includes('三楼'))
+          task.queueName === 'AGV2-3' && ['6', '7'].includes(task.trayStatus)
         );
       }
       return floorTasks;
