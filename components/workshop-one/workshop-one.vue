@@ -495,11 +495,34 @@ export default {
       this.loading = true;
       this.$set(item, 'showDestinationInput', false);
       
-      // 调用发送AGV指令方法，确定任务类型和起点终点
-      const taskType = 'PF-FMR-COMMON-JH2'; // 假设是从缓存区到输送线
-      const fromSiteCode = item.queueName + item.queueNum;
+      // 判断目的地类型，决定任务类型和终点代码
+      const destination = item.destination;
+      let taskType = '';
+      let fromSiteCode = '';
+      let toSiteCode = '';
       
-      this.sendAgvCommand(taskType, fromSiteCode, '201')
+      if (destination.startsWith('D')) {
+        // 一楼目的地，发送到AGV2-2队列
+        taskType = 'PF-FMR-COMMON-JH2'; // 从缓存区到输送线
+        fromSiteCode = item.queueName + item.queueNum;
+        toSiteCode = '201'; // AGV2-2队列
+      } else if (destination.startsWith('E')) {
+        // 三楼目的地，发送到AGV2-3队列
+        taskType = 'PF-FMR-COMMON-JH2'; // 从缓存区到输送线
+        fromSiteCode = item.queueName + item.queueNum;
+        toSiteCode = '301'; // AGV2-3队列
+      } else {
+        // 不支持的目的地格式
+        uni.showToast({
+          title: '输入的目的地不支持，请输入D*或E*格式',
+          icon: 'none'
+        });
+        this.loading = false;
+        this.$set(item, 'showDestinationInput', true);
+        return;
+      }
+      
+      this.sendAgvCommand(taskType, fromSiteCode, toSiteCode)
         .then(robotTaskCode => {
           if (robotTaskCode) {
             // 更新托盘状态为正在发送中
@@ -529,6 +552,8 @@ export default {
                     title: '托盘状态更新失败',
                     icon: 'none'
                   });
+                  // 恢复发送面板状态
+                  this.$set(item, 'showDestinationInput', true);
                 }
               })
               .catch(err => {
@@ -536,6 +561,8 @@ export default {
                   title: '托盘状态更新失败',
                   icon: 'none'
                 });
+                // 恢复发送面板状态
+                this.$set(item, 'showDestinationInput', true);
               })
               .finally(() => {
                 this.loading = false;
@@ -545,6 +572,8 @@ export default {
               title: 'AGV指令发送失败',
               icon: 'none'
             });
+            // 恢复发送面板状态
+            this.$set(item, 'showDestinationInput', true);
             this.loading = false;
           }
         })
@@ -553,6 +582,8 @@ export default {
             title: '发送指令失败',
             icon: 'none'
           });
+          // 恢复发送面板状态
+          this.$set(item, 'showDestinationInput', true);
           this.loading = false;
         });
     },

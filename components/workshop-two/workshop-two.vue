@@ -12,6 +12,19 @@
         </view>
       </view>
       
+      <!-- 队列分组标签页 -->
+      <view class="tabs-container">
+        <view 
+          v-for="(group, index) in queueGroups" 
+          :key="index"
+          class="tab-item"
+          :class="{'active': activeQueueGroup === group.key}"
+          @click="switchQueueGroup(group.key)"
+        >
+          {{ group.name }}
+        </view>
+      </view>
+      
       <!-- 加载指示器 -->
       <view class="loading-container" v-show="loading">
         <view class="loading-spinner"></view>
@@ -52,8 +65,12 @@
                 </view>
               </view>
               <view class="info-item">
-                <text class="info-label">产品名称</text>
-                <text class="info-value product-name">{{ item.trayInfoAdd }}</text>
+                <text class="info-label">产品描述</text>
+                <text class="info-value product-name">{{ item.trayInfoAdd || '暂无描述' }}</text>
+              </view>
+              <view class="info-item" v-if="item.mudidi">
+                <text class="info-label">目的地</text>
+                <text class="info-value">{{ item.mudidi }}</text>
               </view>
             </view>
           </view>
@@ -156,6 +173,10 @@
                     <text class="agv-task-label">任务号:</text>
                     <text class="agv-task-value">{{ task.robotTaskCode || '--' }}</text>
                   </view>
+                  <view class="agv-task-card-row" v-if="task.mudidi">
+                    <text class="agv-task-label">目的地:</text>
+                    <text class="agv-task-value">{{ task.mudidi }}</text>
+                  </view>
                   <view class="agv-task-card-row">
                     <text class="agv-task-label">当前状态:</text>
                     <text class="agv-task-value status-text" :class="getAgvStatusClass(task.trayStatus)">{{ getAgvTaskStatusText(task.trayStatus) }}</text>
@@ -253,10 +274,13 @@ export default {
   name: 'workshop-two',
   data() {
     return {
-      queueName: 'H区缓存库位',
+      queueName: '来料缓存区',
       queueCode: 'H',
       queueData: [],
       loading: false,
+      // 队列分组相关
+      activeQueueGroup: 'incoming', // 当前激活的分组
+      allQueueData: [], // 所有队列数据
       // 新增托盘移位相关数据
       showMoveModal: false,
       currentPallet: null,
@@ -290,11 +314,21 @@ export default {
     displayedAgvTasks() {
       if (!this.allAgvTasks || this.allAgvTasks.length === 0) return [];
       
-      const runningStatuses = ['0', '1'];
+      const runningStatuses = ['0', '1', '3', '4'];
       // 直接返回所有楼层的激活任务
       return this.allAgvTasks.filter(task => 
         task && task.id && task.trayInfo && runningStatuses.includes(task.trayStatus)
       );
+    },
+    queueGroups() {
+      return [
+        { key: 'incoming', name: '来料缓存' },
+        { key: '2500-1', name: '2500-1' },
+        { key: '2500-2', name: '2500-2' },
+        { key: '2500-3', name: '2500-3' },
+        { key: '2500-5', name: '2500-5' },
+        { key: '2500-4', name: '2500-4' }
+      ];
     }
   },
   created() {
@@ -308,8 +342,10 @@ export default {
         queueName: this.queueCode,
       }).then(res => {
         if (res.code === '200' && Array.isArray(res.data)) {
-          this.queueData = res.data;
+          this.allQueueData = res.data;
+          this.filterQueueDataByGroup();
         } else {
+          this.allQueueData = [];
           this.queueData = [];
           uni.showToast({
             title: '获取数据失败',
@@ -326,14 +362,80 @@ export default {
         this.loading = false;
       });
     },
+    
+    // 切换队列分组
+    switchQueueGroup(groupKey) {
+      this.activeQueueGroup = groupKey;
+      this.filterQueueDataByGroup();
+    },
+    
+    // 根据分组过滤队列数据
+    filterQueueDataByGroup() {
+      if (!this.allQueueData || this.allQueueData.length === 0) {
+        this.queueData = [];
+        return;
+      }
+      
+      let filteredData = [];
+      const groupKey = this.activeQueueGroup;
+      
+      switch(groupKey) {
+        case 'incoming':
+          filteredData = this.allQueueData.filter(item => {
+            const num = parseInt(item.queueNum);
+            return num >= 1 && num <= 20;
+          });
+          break;
+        case '2500-1':
+          filteredData = this.allQueueData.filter(item => {
+            const num = parseInt(item.queueNum);
+            return num >= 21 && num <= 49;
+          });
+          break;
+        case '2500-2':
+          filteredData = this.allQueueData.filter(item => {
+            const num = parseInt(item.queueNum);
+            return num >= 50 && num <= 69;
+          });
+          break;
+        case '2500-3':
+          filteredData = this.allQueueData.filter(item => {
+            const num = parseInt(item.queueNum);
+            return num >= 70 && num <= 99;
+          });
+          break;
+        case '2500-5':
+          filteredData = this.allQueueData.filter(item => {
+            const num = parseInt(item.queueNum);
+            return num >= 100 && num <= 119;
+          });
+          break;
+        case '2500-4':
+          filteredData = this.allQueueData.filter(item => {
+            const num = parseInt(item.queueNum);
+            return num >= 150 && num <= 199;
+          });
+          break;
+        default:
+          filteredData = this.allQueueData;
+      }
+      
+      this.queueData = filteredData;
+    },
     getStatusText(status) {
       switch(status) {
         case '0':
           return '在AGV5-1等待取货';
         case '1':
-          return '已在AGV5-1取货，正运往缓存区';
+          return '正运往来料缓存区';
         case '2':
-          return '已送至H区缓存区';
+          return '已送至来料缓存区';
+        case '3':
+          return '在来料缓存区等待取货';
+        case '4':
+          return '正运往最终目的地';
+        case '5':
+          return '已送至目的地终点';
         default:
           return '暂无托盘';
       }
@@ -346,6 +448,12 @@ export default {
           return 'status-moving';
         case '2':
           return 'status-delivered';
+        case '3':
+          return 'status-waiting-pickup';
+        case '4':
+          return 'status-moving-final';
+        case '5':
+          return 'status-delivered-final';
         default:
           return '';
       }
@@ -490,8 +598,8 @@ export default {
     prepareAvailablePositions() {
       const positions = [];
       
-      // 将当前区域的所有位置加入列表
-      this.queueData.forEach(item => {
+      // 将所有队列数据的位置加入列表（不仅限于当前分组）
+      this.allQueueData.forEach(item => {
         // 排除当前托盘自己的位置
         if (this.currentPallet && (item.queueName + item.queueNum) === (this.currentPallet.queueName + this.currentPallet.queueNum)) {
           return;
@@ -502,6 +610,13 @@ export default {
           hasTray: !!item.trayInfo,
           item: item
         });
+      });
+      
+      // 按照队列号排序
+      positions.sort((a, b) => {
+        const numA = parseInt(a.item.queueNum);
+        const numB = parseInt(b.item.queueNum);
+        return numA - numB;
       });
       
       this.availablePositions = positions;
@@ -575,7 +690,10 @@ export default {
           trayStatus: sourcePallet.trayStatus,
           trayInfoAdd: sourcePallet.trayInfoAdd,
           robotTaskCode: sourcePallet.robotTaskCode,
-          targetPosition: sourcePallet.targetPosition
+          targetPosition: sourcePallet.targetPosition,
+          isLock: sourcePallet.isLock,
+          mudidi: sourcePallet.mudidi,
+          targetId: sourcePallet.targetId
         });
         
         // 源托盘位置清空信息
@@ -585,10 +703,14 @@ export default {
           trayStatus: '',
           trayInfoAdd: '',
           robotTaskCode: '',
-          targetPosition: ''
+          targetPosition: '',
+          isWaitCancel: '',
+          isLock: '',
+          mudidi: '',
+          targetId: 0
         });
       } else {
-        // 如果目标位置有托盘，则交换五个指定参数
+        // 如果目标位置有托盘，则交换所有指定参数
         
         // 目标位置托盘获取源托盘信息
         updateList.push({
@@ -597,7 +719,10 @@ export default {
           trayStatus: sourcePallet.trayStatus,
           trayInfoAdd: sourcePallet.trayInfoAdd,
           robotTaskCode: sourcePallet.robotTaskCode,
-          targetPosition: sourcePallet.targetPosition
+          targetPosition: sourcePallet.targetPosition,
+          isLock: sourcePallet.isLock,
+          mudidi: sourcePallet.mudidi,
+          targetId: sourcePallet.targetId
         });
         
         // 源位置托盘获取目标托盘信息
@@ -607,7 +732,10 @@ export default {
           trayStatus: targetPallet.trayStatus,
           trayInfoAdd: targetPallet.trayInfoAdd,
           robotTaskCode: targetPallet.robotTaskCode,
-          targetPosition: targetPallet.targetPosition
+          targetPosition: targetPallet.targetPosition,
+          isLock: targetPallet.isLock,
+          mudidi: targetPallet.mudidi,
+          targetId: targetPallet.targetId
         });
       }
       
@@ -665,7 +793,11 @@ export default {
         trayStatus: '',
         trayInfoAdd: '',
         robotTaskCode: '',
-        targetPosition: ''
+        targetPosition: '',
+        isWaitCancel: '',
+        isLock: '',
+        mudidi: '',
+        targetId: 0
       };
       
       request.post('/queue_info/update', param)
@@ -802,8 +934,11 @@ export default {
     getAgvTaskStatusText(status) {
       const statusMap = {
         '0': '在AGV5-1等待取货',
-        '1': '已在AGV5-1取货，正运往缓存区',
-        '2': '已送至H区缓存区',
+        '1': '正运往来料缓存区',
+        '2': '已送至来料缓存区',
+        '3': '在来料缓存区等待取货',
+        '4': '正运往最终目的地',
+        '5': '已送至目的地终点',
       };
       return statusMap[status] || `未知状态 (${status})`;
     },
@@ -811,8 +946,11 @@ export default {
         // 与主列表状态样式保持一致或自定义
         switch(status) {
             case '0': return 'status-waiting'; // 在AGV5-1等待取货
-            case '1': return 'status-moving';  // 已在AGV5-1取货，正运往缓存区
-            case '2': return 'status-delivered'; // 在缓存区等待取货
+            case '1': return 'status-moving';  // 正运往来料缓存区
+            case '2': return 'status-delivered'; // 已送至来料缓存区
+            case '3': return 'status-waiting-pickup'; // 在来料缓存区等待取货
+            case '4': return 'status-moving-final'; // 正运往最终目的地
+            case '5': return 'status-delivered-final'; // 已送至目的地终点
             default: return '';
         }
     },
@@ -1359,6 +1497,46 @@ export default {
       100% { transform: rotate(360deg); }
     }
     
+    // 选项卡样式 (与workshop-one保持一致)
+    .tabs-container {
+      display: flex;
+      background: #fff;
+      border-radius: 12rpx;
+      overflow: hidden;
+      box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.05);
+      margin-bottom: 32rpx;
+      
+      .tab-item {
+        flex: 1;
+        text-align: center;
+        padding: 28rpx 0;
+        font-size: 28rpx;
+        color: #666;
+        position: relative;
+        transition: all 0.2s ease;
+        
+        &.active {
+          color: #2563eb;
+          font-weight: 500;
+          background: rgba(37, 99, 235, 0.03);
+          
+          &::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 4rpx;
+            background: #2563eb;
+          }
+        }
+        
+        &:active {
+          background: rgba(0, 0, 0, 0.02);
+        }
+      }
+    }
+    
     // 托盘列表
     .pallet-list {
       display: flex;
@@ -1415,6 +1593,21 @@ export default {
           &.status-moving {
             color: #2563eb;
             background: #eff6ff;
+          }
+          
+          &.status-waiting-pickup {
+            color: #6b7280;
+            background: #f3f4f6;
+          }
+          
+          &.status-moving-final {
+            color: #7c3aed;
+            background: #f3e8ff;
+          }
+          
+          &.status-delivered-final {
+            color: #059669;
+            background: #ecfdf5;
           }
         }
         
@@ -1879,6 +2072,21 @@ export default {
               color: #1d4ed8; 
               background-color: #eff6ff; 
               border: 1px solid #bfdbfe;
+            }
+            &.status-waiting-pickup { 
+              color: #6b7280; 
+              background-color: #f3f4f6; 
+              border: 1px solid #d1d5db;
+            }
+            &.status-moving-final { 
+              color: #7c3aed; 
+              background-color: #f3e8ff; 
+              border: 1px solid #c4b5fd;
+            }
+            &.status-delivered-final { 
+              color: #059669; 
+              background-color: #ecfdf5; 
+              border: 1px solid #a7f3d0;
             }
         }
     }
