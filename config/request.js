@@ -1,7 +1,7 @@
 const config = {
   baseUrl: process.env.NODE_ENV === 'development' 
-    ? 'http://192.168.1.9:7005'  // 开发环境
-	// ? 'http://localhost:7005'
+    // ? 'http://192.168.1.9:7005'  // 开发环境
+	? 'http://localhost:7005'
     : 'http://10.120.50.99:7005', // 生产环境
   timeout: 5000
 }

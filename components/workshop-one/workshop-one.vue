@@ -36,7 +36,16 @@
           v-for="(item, index) in currentQueueData" 
           :key="index"
           class="pallet-card"
+          :class="{ 'is-locked': item.isLock === '1' }"
         >
+          <!-- 锁定遮层 -->
+          <view v-if="item.isLock === '1'" class="lock-overlay">
+            <view class="lock-content">
+              <text class="lock-icon">🔒</text>
+              <text class="lock-text">此位置已被占用，正在等待AGV运输</text>
+            </view>
+          </view>
+          
           <view class="card-header">
             <view class="position-badge">{{ item.queueName + item.queueNum }}</view>
             <view class="header-right">
@@ -217,7 +226,7 @@
                   </view>
                   <view class="agv-task-card-row">
                     <text class="agv-task-label">当前状态:</text>
-                    <text class="agv-task-value status-text" :class="getAgvStatusClass(task.trayStatus)">{{ getAgvTaskStatusText(task.trayStatus) }}</text>
+                    <text class="agv-task-value status-text" :class="getAgvStatusClass(task.trayStatus)">{{ getAgvTaskStatusText(task) }}</text>
                   </view>
                   <view class="agv-task-card-row action-row">
                     <text class="agv-task-label">操作:</text>
@@ -362,7 +371,7 @@ export default {
     displayedAgvTasks() {
       if (!this.allAgvTasks || this.allAgvTasks.length === 0) return [];
       
-      const runningStatuses = ['0', '1', '3', '4', '6', '7'];
+      const runningStatuses = ['0', '1', '20', '21', '3', '4', '6', '7'];
       const activeTasks = this.allAgvTasks.filter(task => 
         task && task.id && task.trayInfo && runningStatuses.includes(task.trayStatus)
       );
@@ -375,7 +384,7 @@ export default {
         );
       } else if (this.currentAgvTaskTab === 'floor2') {
         floorTasks = activeTasks.filter(task => 
-          ['0', '1', '3', '4'].includes(task.trayStatus)
+          ['0', '1', '20', '21', '3', '4'].includes(task.trayStatus)
         );
       } else if (this.currentAgvTaskTab === 'floor3') {
         floorTasks = activeTasks.filter(task => 
@@ -429,6 +438,10 @@ export default {
           return '2800已取,正运往缓存区';
         case '2':
           return '已送至二楼缓存区';
+        case '20':
+          return '在缓存区等待AGV取货';
+        case '21':
+          return '已在缓存区取货，正运往目的地';
         case '3':
           return '在缓存区等待AGV取货';
         case '4':
@@ -445,6 +458,10 @@ export default {
           return 'status-moving';
         case '2':
           return 'status-delivered';
+        case '20':
+          return 'status-waiting';
+        case '21':
+          return 'status-moving';
         case '3':
           return 'status-waiting';
         case '4':
@@ -909,7 +926,11 @@ export default {
         trayStatus: '',
         trayInfoAdd: '',
         robotTaskCode: '',
-        targetPosition: ''
+        targetPosition: '',
+        isWaitCancel: '',
+        isLock: '',
+        mudidi: '',
+        targetId: 0
       };
       
       request.post('/queue_info/update', param)
@@ -1041,22 +1062,28 @@ export default {
         this.agvTasksLoading = false;
       }
     },
-    getAgvTaskStatusText(status) {
+    getAgvTaskStatusText(task) {
       const statusMap = {
         '0': '在2800等待AGV取货',
         '1': '已在2800取货，正往缓存区运送',
+        '20': '在缓存区等待AGV取货',
+        '21': '已在缓存区取货，正往运往目的地',
         '3': '在缓存区等待AGV取货',
         '4': '已在缓存区取货，正往运往目的地',
-        '6': '等待一楼AGV取货',
-        '7': 'AGV已在一楼AGV1-1取货，正运往目的地'
+        '6': task.queueName === 'AGV2-2' ? '等待一楼AGV取货' : '等待三楼AGV取货',
+        '7': task.queueName === 'AGV2-2'
+            ? 'AGV已在一楼AGV1-1取货，正运往目的地'
+            : 'AGV已在三楼AGV3-1取货，正运往目的地'
       };
-      return statusMap[status] || `未知状态 (${status})`;
+      return statusMap[task.trayStatus] || `未知状态 (${task.trayStatus})`;
     },
     getAgvStatusClass(status) {
         // 与主列表状态样式保持一致或自定义
         switch(status) {
             case '0': return 'status-waiting'; // 在2800等待AGV取货
             case '1': return 'status-moving';  // 已在2800取货，正往缓存区运送
+            case '20': return 'status-waiting'; // 在缓存区等待AGV取货
+            case '21': return 'status-moving';  // 已在缓存区取货，正往运往目的地
             case '3': return 'status-waiting'; // 在缓存区等待AGV取货
             case '4': return 'status-moving';  // 已在缓存区取货，正往运往目的地
             case '6': return 'status-waiting'; // 等待一楼AGV取货
@@ -1231,6 +1258,29 @@ export default {
         uni.showToast({ title: '当前正在循环执行，请先停止循环执行', icon: 'none' });
         return;
       }
+
+      // 添加确认对话框
+      try {
+        await new Promise((resolve, reject) => {
+          uni.showModal({
+            title: '确认执行',
+            content: `确认执行AGV单次调度任务吗？\n起点：${this.agvScheduleData.startPosition}\n终点：${this.agvScheduleData.endPosition}`,
+            success: (res) => {
+              if (res.confirm) {
+                resolve();
+              } else {
+                reject();
+              }
+            },
+            fail: () => {
+              reject();
+            }
+          });
+        });
+      } catch {
+        // 用户取消了操作
+        return;
+      }
       
       // PF-FMR-COMMON-JH	转盘-输送线，起点终点都与plc进行安全交互
       // PF-FMR-COMMON-JH1 转盘-缓存区，只有起点与plc进行安全交互
@@ -1268,7 +1318,7 @@ export default {
               queueNum
             });
             if (res.code === '200' && res.data && res.data.length > 0) {
-              if (res.data[0].trayInfo === null || res.data[0].trayInfo === '') {
+              if ((res.data[0].trayInfo === null || res.data[0].trayInfo === '') && res.data[0].isLock !== '1') {
                 this.agvScheduleData.status = 'singleRunning';
                 // 调用发送AGV指令方法
                 const robotTaskCode = await this.sendAgvCommand(
@@ -1368,140 +1418,184 @@ export default {
         fromSiteCode = startPos;
         if (endPos.includes('AGV')) {
           // 缓存区-输送线，只有终点与plc进行安全交互
-          taskType = 'PF-FMR-COMMON-JH2';
-          toSiteCode = this.agvCodeMap[endPos];
-          // 判断起点缓存位有没有托盘占位，如果没有直接报错提示，并返回
-          try {
-            const queueName = fromSiteCode.charAt(0);
-            const queueNum = fromSiteCode.substring(1);
-            const res = await request.post('/queue_info/queryQueueList', {
-              queueName,
-              queueNum
-            });
-            if (res.code === '200' && res.data && res.data.length > 0) {
-              if (res.data[0].trayInfo === null || res.data[0].trayInfo === '') {
-                console.log(`起点：${fromSiteCode}没有信息，请扫码录入信息。`);
-                uni.showToast({
-                  title: `起点：${fromSiteCode}没有信息，请扫码录入信息。`,
-                  icon: 'none'
-                });
-              } else {
-                this.agvScheduleData.status = 'singleRunning';
-                // 调用发送AGV指令方法
-                const robotTaskCode = await this.sendAgvCommand(
-                  taskType,
-                  fromSiteCode,
-                  toSiteCode
-                );
-                if (robotTaskCode !== '') {
-                  // 缓存区-输送线
-                  const param = {
-                    id: res.data[0].id,
-                    trayStatus: '3', // -在缓存区等待AGV取货
-                    robotTaskCode,
-                    targetPosition: endPos // 保存目的地信息
-                  };
-                  request.post('/queue_info/update', param)
-                    .then((returnRes) => {
-                      if (returnRes.code === '200' && returnRes.data == 1) {
-                        console.log(
-                          `从${fromSiteCode}手动调度去往${toSiteCode}成功！`
-                        );
-                        uni.showToast({
-                          title: `从${fromSiteCode}手动调度去往${toSiteCode}成功！`,
-                          icon: 'success'
-                        });
-                      } else {
-                        console.log(`手动调度去往缓存区：${toSiteCode}失败！`);
-                        uni.showToast({
-                          title: `手动调度去往缓存区：${toSiteCode}失败！`,
-                          icon: 'none'
-                        });
-                      }
-                    })
-                    .catch((err) => {
-                      console.log(
-                        `手动调度去往缓存区：${toSiteCode}失败！${err}`
-                      );
-                      uni.showToast({
-                        title: `手动调度去往缓存区：${toSiteCode}失败！${err}`,
-                        icon: 'none'
-                      });
-                    });
-                }
-              }
-            } else {
-              uni.showToast({
-                title: '未查到此起点信息，请检查输入的缓存区位置是否正确',
-                icon: 'none'
-              });
-              console.log('未查到此起点信息，请检查输入的缓存区位置是否正确');
-            }
-          } catch (e) {
-            uni.showToast({
-              title: '检查起点缓存区异常',
-              icon: 'none'
-            });
-            this.agvScheduleData.status = 'idle';
-            return;
-          }
+          // taskType = 'PF-FMR-COMMON-JH2';
+          // toSiteCode = this.agvCodeMap[endPos];
+          // // 判断起点缓存位有没有托盘占位，如果没有直接报错提示，并返回
+          // try {
+          //   const queueName = fromSiteCode.charAt(0);
+          //   const queueNum = fromSiteCode.substring(1);
+          //   const res = await request.post('/queue_info/queryQueueList', {
+          //     queueName,
+          //     queueNum
+          //   });
+          //   if (res.code === '200' && res.data && res.data.length > 0) {
+          //     if (res.data[0].trayInfo === null || res.data[0].trayInfo === '') {
+          //       console.log(`起点：${fromSiteCode}没有信息，请扫码录入信息。`);
+          //       uni.showToast({
+          //         title: `起点：${fromSiteCode}没有信息，请扫码录入信息。`,
+          //         icon: 'none'
+          //       });
+          //     } else {
+          //       this.agvScheduleData.status = 'singleRunning';
+          //       // 调用发送AGV指令方法
+          //       const robotTaskCode = await this.sendAgvCommand(
+          //         taskType,
+          //         fromSiteCode,
+          //         toSiteCode
+          //       );
+          //       if (robotTaskCode !== '') {
+          //         // 缓存区-输送线
+          //         const param = {
+          //           id: res.data[0].id,
+          //           trayStatus: '3', // -在缓存区等待AGV取货
+          //           robotTaskCode,
+          //           targetPosition: endPos // 保存目的地信息
+          //         };
+          //         request.post('/queue_info/update', param)
+          //           .then((returnRes) => {
+          //             if (returnRes.code === '200' && returnRes.data == 1) {
+          //               console.log(
+          //                 `从${fromSiteCode}手动调度去往${toSiteCode}成功！`
+          //               );
+          //               uni.showToast({
+          //                 title: `从${fromSiteCode}手动调度去往${toSiteCode}成功！`,
+          //                 icon: 'success'
+          //               });
+          //             } else {
+          //               console.log(`手动调度去往缓存区：${toSiteCode}失败！`);
+          //               uni.showToast({
+          //                 title: `手动调度去往缓存区：${toSiteCode}失败！`,
+          //                 icon: 'none'
+          //               });
+          //             }
+          //           })
+          //           .catch((err) => {
+          //             console.log(
+          //               `手动调度去往缓存区：${toSiteCode}失败！${err}`
+          //             );
+          //             uni.showToast({
+          //               title: `手动调度去往缓存区：${toSiteCode}失败！${err}`,
+          //               icon: 'none'
+          //             });
+          //           });
+          //       }
+          //     }
+          //   } else {
+          //     uni.showToast({
+          //       title: '未查到此起点信息，请检查输入的缓存区位置是否正确',
+          //       icon: 'none'
+          //     });
+          //     console.log('未查到此起点信息，请检查输入的缓存区位置是否正确');
+          //   }
+          // } catch (e) {
+          //   uni.showToast({
+          //     title: '检查起点缓存区异常',
+          //     icon: 'none'
+          //   });
+          //   this.agvScheduleData.status = 'idle';
+          //   return;
+          // }
+          uni.showToast({
+            title: `不可直接发送到输送线`,
+            icon: 'none'
+          });
         } else {
           // 缓存区-缓存区
           taskType = 'PF-FMR-COMMON-PY';
           toSiteCode = endPos;
-          // 判断目的地缓存位有没有托盘占位，如果有直接报错提示，并返回
+          fromSiteCode = startPos;
+          
           try {
-            const queueName = toSiteCode.charAt(0);
-            const queueNum = toSiteCode.substring(1);
-            const res = await request.post('/queue_info/queryQueueList', {
-              queueName,
-              queueNum
+            // 判断起点缓存位有没有托盘占位，如果没有直接报错提示，并返回
+            const resQiDian = await request.post('/queue_info/queryQueueList', {
+              queueName: fromSiteCode.charAt(0),
+              queueNum: fromSiteCode.substring(1)
             });
-            if (res.code === '200' && res.data && res.data.length > 0) {
-              if (res.data[0].trayInfo) {
+            
+            if (resQiDian.code === '200' && resQiDian.data && resQiDian.data.length > 0) {
+              if (resQiDian.data[0].trayInfo === null || resQiDian.data[0].trayInfo === '') {
                 uni.showToast({
-                  title: `目的地：${toSiteCode}缓存位有托盘占位，请检查。`,
+                  title: `起点：${fromSiteCode}没有信息，请扫码录入信息。`,
                   icon: 'none'
-                });
-                console.log(`目的地：${toSiteCode}缓存位有托盘占位，请检查。`);
-                return;
-              }
-              
-              // 检查起点缓存区是否有货
-              const queueNameSource = fromSiteCode.charAt(0);
-              const queueNumSource = fromSiteCode.substring(1);
-              const resSource = await request.post('/queue_info/queryQueueList', { 
-                queueName: queueNameSource, 
-                queueNum: queueNumSource 
-              });
-              
-              if (resSource.code === '200' && resSource.data && resSource.data.length > 0) {
-                if (!resSource.data[0].trayInfo) {
-                  uni.showToast({ 
-                    title: `起点缓存区 ${fromSiteCode} 无托盘`, 
-                    icon: 'none' 
-                  });
-                  this.agvScheduleData.status = 'idle';
-                  return;
-                }
-                // 有托盘，可以执行
-                this.agvScheduleData.status = 'singleRunning';
-                // 调用发送AGV指令方法
-                this.sendAgvCommand(taskType, fromSiteCode, toSiteCode);
-              } else {
-                uni.showToast({ 
-                  title: `查询起点缓存区 ${fromSiteCode} 失败或不存在`, 
-                  icon: 'none' 
                 });
                 this.agvScheduleData.status = 'idle';
                 return;
+              } else {
+                // 判断目的地缓存位有没有托盘占位，如果有直接报错提示，并返回
+                const res = await request.post('/queue_info/queryQueueList', {
+                  queueName: toSiteCode.charAt(0),
+                  queueNum: toSiteCode.substring(1)
+                });
+                
+                if (res.code === '200' && res.data && res.data.length > 0) {
+                  if (
+                    (res.data[0].trayInfo === null || res.data[0].trayInfo === '') &&
+                    res.data[0].isLock !== '1'
+                  ) {
+                    this.agvScheduleData.status = 'singleRunning';
+                    // 调用发送AGV指令方法
+                    const robotTaskCode = await this.sendAgvCommand(
+                      taskType,
+                      fromSiteCode,
+                      toSiteCode
+                    );
+                    
+                    if (robotTaskCode !== '') {
+                      // 缓存区-缓存区：使用批量更新，锁定目标位置并设置起点状态
+                      const param = [
+                        {
+                          id: resQiDian.data[0].id,
+                          trayStatus: '20',
+                          robotTaskCode,
+                          targetPosition: toSiteCode,
+                          targetId: res.data[0].id
+                        },
+                        {
+                          id: res.data[0].id,
+                          isLock: '1'
+                        }
+                      ];
+                      
+                      request.post('/queue_info/updateByList', param)
+                        .then((returnRes) => {
+                          if (returnRes.code === '200' && returnRes.data == 1) {
+                            uni.showToast({
+                              title: `手动调度去往缓存区：${toSiteCode}成功！`,
+                              icon: 'success'
+                            });
+                          } else {
+                            uni.showToast({
+                              title: `手动调度去往缓存区：${toSiteCode}失败！`,
+                              icon: 'none'
+                            });
+                          }
+                        })
+                        .catch((err) => {
+                          uni.showToast({
+                            title: `手动调度去往缓存区：${toSiteCode}失败！${err}`,
+                            icon: 'none'
+                          });
+                        });
+                    }
+                  } else {
+                    uni.showToast({
+                      title: `目的地：${toSiteCode}缓存位有托盘占位，请检查。`,
+                      icon: 'none'
+                    });
+                  }
+                } else {
+                  uni.showToast({
+                    title: '没有此目标缓存区位置，请检查输入的缓存区位置是否正确',
+                    icon: 'none'
+                  });
+                  this.agvScheduleData.status = 'idle';
+                }
               }
             } else {
               uni.showToast({
-                title: '没有此缓存区位置，请检查输入的缓存区位置是否正确',
+                title: '没有此起点缓存区位置，请检查输入的缓存区位置是否正确',
                 icon: 'none'
               });
-              console.log('没有此缓存区位置，请检查输入的缓存区位置是否正确');
               this.agvScheduleData.status = 'idle';
             }
           } catch (e) {
@@ -1660,6 +1754,48 @@ export default {
       overflow: hidden;
       box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.12);
       margin-bottom: 30rpx;
+      position: relative;
+      
+      &.is-locked {
+        position: relative;
+      }
+      
+      // 锁定遮层样式
+      .lock-overlay {
+        position: absolute;
+        top: 100rpx; // 跳过标题区域的高度
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+        border-radius: 0 0 16rpx 16rpx; // 只有底部圆角
+        transition: all 0.3s ease;
+        
+        .lock-content {
+          display: flex;
+          align-items: center;
+          gap: 24rpx;
+          color: #fff;
+          font-size: 28rpx;
+          font-weight: 500;
+          
+          .lock-icon {
+            font-size: 48rpx;
+            color: #e6a23c;
+          }
+          
+          .lock-text {
+            font-size: 28rpx;
+            color: #fff;
+            text-align: center;
+            line-height: 1.4;
+          }
+        }
+      }
       
       .card-header {
         display: flex;
