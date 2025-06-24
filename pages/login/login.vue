@@ -121,6 +121,7 @@
 
 <script>
 import LoadingSpin from '@/components/loading-spin.vue'
+import request from '@/config/request.js'
 
 export default {
   components: {
@@ -128,8 +129,8 @@ export default {
   },
   data() {
     return {
-      username: 'test',
-      password: '1',
+      username: '',
+      password: '',
       loading: false,
       // 配置相关
       showConfig: false,
@@ -236,22 +237,57 @@ export default {
       
       this.loading = true
       try {
-        // 模拟登录请求
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
-        // 保存登录状态和车间配置
-        uni.setStorageSync('token', 'demo_token')
-        uni.setStorageSync('username', this.username)
-        uni.setStorageSync('current_workshop', this.currentWorkshop)
-        
-        // 跳转到首页
-        uni.reLaunch({
-          url: '/pages/home/home'
+        // 调用真实的登录API
+        const response = await request.post('/login/login', {
+          userCode: this.username,
+          userPassword: this.password
         })
+        
+        // 检查响应状态
+        if (response.code === '200' && response.data) {
+          const userData = response.data
+          
+          // 检查用户角色，只允许操作员登录移动端
+          if (userData.userRole !== 'OPERATOR') {
+            uni.showModal({
+              title: '登录提示',
+              content: '移动端仅支持操作员登录，请使用操作员账号',
+              showCancel: false,
+              confirmText: '知道了'
+            })
+            this.loading = false
+            return
+          }
+          
+          // 保存登录状态和车间配置
+          uni.setStorageSync('token', userData.userId) // 使用userId作为token
+          uni.setStorageSync('username', userData.userName)
+          uni.setStorageSync('userCode', userData.userCode)
+          uni.setStorageSync('current_workshop', this.currentWorkshop)
+          
+          uni.showToast({
+            title: '登录成功',
+            icon: 'success'
+          })
+          
+          // 立即跳转到首页
+          uni.reLaunch({
+            url: '/pages/home/home'
+          })
+        } else {
+          // 处理登录失败 - 直接显示后端返回的错误信息
+          uni.showToast({
+            title: response.message || '登录失败',
+            icon: 'none',
+            duration: 3000
+          })
+        }
       } catch (error) {
+        console.error('登录失败:', error)
         uni.showToast({
-          title: '登录失败',
-          icon: 'error'
+          title: error.message || '登录失败，请检查网络',
+          icon: 'none',
+          duration: 3000
         })
       } finally {
         this.loading = false

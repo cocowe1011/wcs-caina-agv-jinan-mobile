@@ -48,7 +48,7 @@ export default {
   },
   data() {
     return {
-      username: '测试员',
+      username: '用户',
       statusBarHeight: 0,
       pageReady: false,
       currentWorkshop: 1, // 默认显示2800车间
@@ -60,6 +60,16 @@ export default {
     // 获取状态栏高度
     const systemInfo = uni.getSystemInfoSync()
     this.statusBarHeight = systemInfo.statusBarHeight
+    
+    // 从登录时保存的用户信息中读取用户名
+    try {
+      const savedUsername = uni.getStorageSync('username')
+      if (savedUsername) {
+        this.username = savedUsername
+      }
+    } catch (error) {
+      console.error('读取用户信息失败:', error)
+    }
     
     // 从登录时保存的配置中读取当前车间
     try {
@@ -82,14 +92,24 @@ export default {
   
   methods: {
     handleLogout() {
-      // 只清除登录相关的存储，保留车间配置
-      uni.removeStorageSync('token')
-      uni.removeStorageSync('username')
-      uni.removeStorageSync('current_workshop')
-      // 注意：不清除 workshop_config，保留车间配置
-      
-      uni.reLaunch({
-        url: '/pages/login/login'
+      uni.showModal({
+        title: '确认退出',
+        content: '确定要退出登录吗？',
+        confirmText: '确认退出',
+        cancelText: '取消',
+        success: (res) => {
+          if (res.confirm) {
+            // 只清除登录相关的存储，保留车间配置
+            uni.removeStorageSync('token')
+            uni.removeStorageSync('username')
+            uni.removeStorageSync('current_workshop')
+            // 注意：不清除 workshop_config，保留车间配置
+            
+            uni.reLaunch({
+              url: '/pages/login/login'
+            })
+          }
+        }
       })
     }
   }
