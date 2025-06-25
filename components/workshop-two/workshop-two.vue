@@ -126,6 +126,13 @@
       <text class="fab-text">调度</text>
     </view>
 
+    <!-- 新增: 报警日志悬浮按钮 -->
+    <view class="fab-btn alarm-fab" :class="{'has-unread-alarms': unreadAlarmCount > 0}" @click="toggleAlarmModal">
+      <text class="fab-text">报警</text>
+      <text class="fab-text">日志</text>
+      <view v-if="unreadAlarmCount > 0" class="alarm-badge">{{ unreadAlarmCount }}</view>
+    </view>
+
     <!-- AGV运行中任务管理弹窗 -->
     <view class="modal-overlay" v-if="showAgvTaskModal" @click="toggleAgvTaskModal">
       <view class="agv-task-modal-content" @click.stop>
@@ -263,12 +270,76 @@
         </view>
       </view>
     </view>
+
+    <!-- 新增: 报警日志弹窗 -->
+    <view class="modal-overlay" v-if="showAlarmModal" @click="toggleAlarmModal">
+      <view class="alarm-modal-content" @click.stop>
+        <view class="alarm-modal-header">
+          <text class="alarm-modal-title">2500车间报警日志</text>
+          <view class="alarm-actions">
+            <view class="connection-status" :class="{'connected': wsStatus.isConnected, 'disconnected': !wsStatus.isConnected}">
+              <text class="status-dot"></text>
+              <text class="status-text">{{ wsStatus.isConnected ? '已连接' : '未连接' }}</text>
+            </view>
+            <view class="alarm-refresh-btn" @click="refreshAlarmLogs">
+              <text class="refresh-text">刷新</text>
+            </view>
+          </view>
+        </view>
+        
+        <view class="alarm-modal-body">
+          <scroll-view scroll-y="true" class="alarm-list">
+            <!-- 空状态提示 -->
+            <view class="empty-state alarm-empty-state" v-if="alarmLogs.length === 0">
+              <text class="empty-icon">🚨</text>
+              <text class="empty-text">暂无报警日志</text>
+              <text class="empty-desc">电脑端产生报警时会自动推送到此处</text>
+            </view>
+
+            <!-- 报警日志列表 -->
+            <view v-if="alarmLogs.length > 0">
+              <view 
+                v-for="alarm in alarmLogs" 
+                :key="alarm.id" 
+                class="alarm-card"
+                :class="{'unread': alarm.unread}"
+                @click="markAlarmAsRead(alarm)"
+              >
+                <view class="alarm-card-header">
+                  <view class="alarm-source">{{ alarm.source }}</view>
+                  <view class="alarm-time">{{ formatAlarmTime(alarm.timestamp) }}</view>
+                </view>
+                <view class="alarm-message">{{ alarm.message }}</view>
+                <view v-if="alarm.unread" class="unread-indicator">
+                  <text class="unread-text">未读</text>
+                </view>
+              </view>
+            </view>
+          </scroll-view>
+        </view>
+        
+        <view class="alarm-modal-footer">
+          <view class="alarm-footer-actions">
+            <view class="alarm-btn clear-btn" @click="clearAllAlarms" v-if="alarmLogs.length > 0">
+              清空日志
+            </view>
+            <view class="alarm-btn mark-read-btn" @click="markAllAlarmsAsRead" v-if="unreadAlarmCount > 0">
+              全部已读
+            </view>
+            <view class="alarm-btn close-btn" @click="toggleAlarmModal">
+              关闭
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script>
 import request from '@/config/request.js'
 import requestAgv from '@/config/requestAgv.js'
+import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
 
 export default {
   name: 'workshop-two',
@@ -305,6 +376,14 @@ export default {
         'AGV1-1': '202', // 一楼提升机出口
         'AGV3-1': '302'  // 三楼提升机出口
       },
+      
+      // 报警日志相关
+      showAlarmModal: false,
+      alarmLogs: [],
+      wsClient: null,
+      wsStatus: {
+        isConnected: false
+      }
     }
   },
   computed: {
@@ -329,10 +408,23 @@ export default {
         { key: '2500-5', name: '2500-5' },
         { key: '2500-4', name: '2500-4' }
       ];
+    },
+    
+    // 未读报警数量
+    unreadAlarmCount() {
+      return this.alarmLogs.filter(alarm => alarm.unread).length;
     }
   },
   created() {
     this.fetchQueueData();
+    this.initWebSocket();
+  },
+  beforeDestroy() {
+    // 组件销毁前断开WebSocket连接
+    if (this.wsClient) {
+      this.wsClient.disconnect();
+      this.wsClient = null;
+    }
   },
   methods: {
     fetchQueueData() {
@@ -1404,6 +1496,169 @@ export default {
           }
         }
       }
+    },
+
+    // ============ WebSocket和报警日志相关方法 ============
+    // 初始化WebSocket连接
+    initWebSocket() {
+      this.wsClient = new AlarmWebSocketClient({
+        workshop: '2500', // 2500车间
+        onConnected: this.onWebSocketConnected,
+        onDisconnected: this.onWebSocketDisconnected,
+        onAlarmReceived: this.onAlarmReceived,
+        onError: this.onWebSocketError
+      });
+      
+      this.wsClient.connect();
+    },
+
+    // WebSocket连接成功
+    onWebSocketConnected() {
+      console.log('WebSocket连接成功');
+      this.wsStatus.isConnected = true;
+      uni.showToast({
+        title: '连接服务器成功',
+        icon: 'success',
+        duration: 2000
+      });
+    },
+
+    // WebSocket连接断开
+    onWebSocketDisconnected() {
+      console.log('WebSocket连接断开');
+      this.wsStatus.isConnected = false;
+      uni.showToast({
+        title: '服务器连接断开',
+        icon: 'none',
+        duration: 2000
+      });
+    },
+
+    // 收到报警消息
+    onAlarmReceived(alarmLog) {
+      // 添加到本地报警列表
+      this.alarmLogs.unshift(alarmLog);
+      // 保持日志数量在合理范围内
+      if (this.alarmLogs.length > 100) {
+        this.alarmLogs.pop();
+      }
+      // 显示通知
+      uni.showToast({
+        title: `报警: ${alarmLog.message}`,
+        icon: 'error',
+        position: 'top'
+      });
+      
+      // 震动提醒（需要用户交互后才能生效）
+      this.tryVibrate();
+    },
+
+    // WebSocket错误
+    onWebSocketError(error) {
+      console.error('WebSocket错误:', error);
+      this.wsStatus.isConnected = false;
+    },
+
+    // 切换报警日志弹窗
+    toggleAlarmModal() {
+      this.showAlarmModal = !this.showAlarmModal;
+    },
+
+    // 刷新报警日志
+    refreshAlarmLogs() {
+      if (this.wsClient) {
+        const status = this.wsClient.getConnectionStatus();
+        this.wsStatus.isConnected = status.isConnected;
+        this.alarmLogs = this.wsClient.getAlarmLogs();
+      }
+      
+      uni.showToast({
+        title: '刷新完成',
+        icon: 'success',
+        duration: 1000
+      });
+    },
+
+    // 标记单个报警为已读
+    markAlarmAsRead(alarm) {
+      alarm.unread = false;
+      
+      // 同步到WebSocket客户端
+      if (this.wsClient) {
+        const clientAlarms = this.wsClient.getAlarmLogs();
+        const clientAlarm = clientAlarms.find(a => a.id === alarm.id);
+        if (clientAlarm) {
+          clientAlarm.unread = false;
+        }
+      }
+    },
+
+    // 标记所有报警为已读
+    markAllAlarmsAsRead() {
+      this.alarmLogs.forEach(alarm => {
+        alarm.unread = false;
+      });
+      
+      // 同步到WebSocket客户端
+      if (this.wsClient) {
+        this.wsClient.markAlarmsAsRead();
+      }
+      
+      uni.showToast({
+        title: '已全部标记为已读',
+        icon: 'success',
+        duration: 1000
+      });
+    },
+
+    // 清空所有报警日志
+    clearAllAlarms() {
+      uni.showModal({
+        title: '确认清空',
+        content: '确定要清空所有报警日志吗？',
+        success: (res) => {
+          if (res.confirm) {
+            this.alarmLogs = [];
+            
+            // 同步到WebSocket客户端
+            if (this.wsClient) {
+              this.wsClient.clearAlarmLogs();
+            }
+            
+            uni.showToast({
+              title: '已清空报警日志',
+              icon: 'success',
+              duration: 1000
+            });
+          }
+        }
+      });
+    },
+
+    // 格式化报警时间
+    formatAlarmTime(timestamp) {
+      if (!timestamp) return '--';
+      const date = new Date(timestamp);
+      
+      // 手动格式化时分秒，避免时区信息显示
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      const seconds = date.getSeconds().toString().padStart(2, '0');
+      
+      return `${hours}:${minutes}:${seconds}`;
+    },
+
+    // 尝试震动提醒（处理浏览器用户激活策略）
+    tryVibrate() {
+      try {
+        // 检查是否支持震动
+        if (typeof uni.vibrateLong === 'function') {
+          uni.vibrateLong();
+        }
+      } catch (error) {
+        // 静默处理震动失败（通常是因为缺少用户交互）
+        console.log('震动提醒被浏览器阻止，需要用户交互后才能生效');
+      }
     }
   }
 }
@@ -1903,6 +2158,65 @@ export default {
     }
   }
 
+  // 报警日志悬浮按钮样式
+  .alarm-fab {
+    bottom: 340rpx; // 调整位置，避免与其他按钮重叠
+    background-color: #f59e0b; // 橙色背景
+
+    &:active {
+      background-color: #d97706;
+    }
+    
+    // 脉冲效果 - 只在有未读报警时显示
+    &.has-unread-alarms::before {
+      content: '';
+      position: absolute;
+      top: -6rpx;
+      left: -6rpx;
+      right: -6rpx;
+      bottom: -6rpx;
+      background-color: #ef4444;
+      border-radius: 50%;
+      opacity: 0;
+      animation: alarm-pulse 2s infinite;
+      z-index: -1;
+    }
+
+    .alarm-badge {
+      position: absolute;
+      top: -10rpx;
+      right: -10rpx;
+      min-width: 36rpx;
+      height: 36rpx;
+      background-color: #ef4444;
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20rpx;
+      font-weight: 600;
+      border: 2rpx solid #fff;
+      box-shadow: 0 2rpx 8rpx rgba(239, 68, 68, 0.4);
+    }
+  }
+  
+  // 脉冲动画
+  @keyframes alarm-pulse {
+    0% {
+      opacity: 0;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.3;
+      transform: scale(1.2);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.4);
+    }
+  }
+
   // AGV任务管理弹窗样式
   .agv-task-modal-content {
     width: 90%;
@@ -2239,6 +2553,272 @@ export default {
         &.close-btn {
           background: #6b7280; 
            &:active { background: #4b5563; }
+        }
+      }
+    }
+  }
+
+  // 报警日志弹窗样式
+  .alarm-modal-content {
+    width: 90%;
+    max-width: 700rpx;
+    height: 80vh;
+    background: #ffffff;
+    border-radius: 16rpx;
+    overflow: hidden;
+    box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    color: #333;
+  }
+
+  .alarm-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 24rpx;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    flex-shrink: 0;
+
+    .alarm-modal-title {
+      font-size: 32rpx;
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .alarm-actions {
+      display: flex;
+      align-items: center;
+    }
+
+    .connection-status {
+      display: flex;
+      align-items: center;
+      gap: 8rpx;
+      padding: 6rpx 12rpx;
+      border-radius: 12rpx;
+      background: #f3f4f6;
+      font-size: 22rpx;
+      margin-right: 16rpx;
+
+      .status-dot {
+        width: 12rpx;
+        height: 12rpx;
+        border-radius: 50%;
+        display: block;
+      }
+
+      &.connected .status-dot {
+        background: #10b981;
+      }
+
+      &.disconnected .status-dot {
+        background: #ef4444;
+      }
+
+      .status-text {
+        color: #6b7280;
+        font-weight: 500;
+      }
+    }
+
+    .alarm-refresh-btn {
+      background: #2563eb;
+      color: #fff;
+      padding: 8rpx 16rpx;
+      border-radius: 8rpx;
+      font-size: 22rpx;
+      font-weight: 500;
+
+      &:active {
+        background: #1d4ed8;
+      }
+    }
+  }
+
+  .alarm-modal-body {
+    flex: 1;
+    overflow: hidden;
+    background: #f8f9fa;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .alarm-list {
+    flex: 1;
+    padding: 16rpx;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .alarm-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80rpx 40rpx;
+    text-align: center;
+    height: 100%;
+    box-sizing: border-box;
+
+    .empty-icon {
+      font-size: 80rpx;
+      margin-bottom: 20rpx;
+      color: #9ca3af;
+    }
+
+    .empty-text {
+      font-size: 28rpx;
+      font-weight: 500;
+      color: #6b7280;
+      margin-bottom: 12rpx;
+    }
+
+    .empty-desc {
+      font-size: 24rpx;
+      color: #9ca3af;
+      line-height: 1.5;
+    }
+  }
+
+  .alarm-card {
+    background: #ffffff;
+    border: 1rpx solid #e5e7eb;
+    border-radius: 12rpx;
+    padding: 20rpx;
+    margin-bottom: 16rpx;
+    box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.05);
+    position: relative;
+    width: 100%;
+    box-sizing: border-box;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    &.unread {
+      background: #fef2f2;
+      border-color: #fecaca;
+      box-shadow: 0 2rpx 8rpx rgba(239, 68, 68, 0.1);
+
+      &::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4rpx;
+        background: #ef4444;
+        border-radius: 0 2rpx 2rpx 0;
+      }
+    }
+
+    &:active {
+      background: #f9fafb;
+    }
+
+    .alarm-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12rpx;
+
+      .alarm-source {
+        font-size: 22rpx;
+        color: #374151;
+        background: #f3f4f6;
+        padding: 4rpx 8rpx;
+        border-radius: 8rpx;
+        font-weight: 500;
+        white-space: nowrap;
+        flex-shrink: 0;
+        max-width: 150rpx;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .alarm-time {
+        font-size: 22rpx;
+        color: #9ca3af;
+        font-weight: 400;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+    }
+
+    .alarm-message {
+      font-size: 26rpx;
+      color: #1f2937;
+      line-height: 1.5;
+      font-weight: 500;
+      margin-bottom: 8rpx;
+      word-wrap: break-word;
+      word-break: break-all;
+      white-space: normal;
+      overflow-wrap: break-word;
+    }
+
+    .unread-indicator {
+      text-align: right;
+
+      .unread-text {
+        font-size: 20rpx;
+        color: #ef4444;
+        background: #fee2e2;
+        padding: 2rpx 8rpx;
+        border-radius: 8rpx;
+        font-weight: 500;
+      }
+    }
+  }
+
+  .alarm-modal-footer {
+    padding: 20rpx 24rpx;
+    background: #ffffff;
+    border-top: 1px solid #e5e7eb;
+    flex-shrink: 0;
+
+    .alarm-footer-actions {
+      display: flex;
+
+      .alarm-btn {
+        flex: 1;
+        text-align: center;
+        padding: 16rpx 0;
+        font-size: 26rpx;
+        font-weight: 500;
+        border-radius: 8rpx;
+        color: #fff;
+        margin-right: 12rpx;
+        
+        &:last-child {
+          margin-right: 0;
+        }
+
+        &.clear-btn {
+          background: #ef4444;
+
+          &:active {
+            background: #dc2626;
+          }
+        }
+
+        &.mark-read-btn {
+          background: #10b981;
+
+          &:active {
+            background: #059669;
+          }
+        }
+
+        &.close-btn {
+          background: #6b7280;
+
+          &:active {
+            background: #4b5563;
+          }
         }
       }
     }
