@@ -6,6 +6,10 @@
         <text class="queue-title">{{ queueName }}</text>
         <view class="header-right">
           <text class="queue-count">共 {{ currentQueueData.length }} 个托盘</text>
+          <view class="scan-btn" @click="handleScanCode">
+            <text class="cuIcon-scan scan-icon"></text>
+            <text class="scan-text">上货扫码</text>
+          </view>
           <view class="refresh-btn" @click="fetchQueueData">
             <text class="refresh-text" :class="{'refreshing': loading}">刷新</text>
           </view>
@@ -1659,7 +1663,168 @@ export default {
         // 静默处理震动失败（通常是因为缺少用户交互）
         console.log('震动提醒被浏览器阻止，需要用户交互后才能生效');
       }
-    }
+    },
+
+    // === 新增：上货扫码相关方法 ===
+    // 点击上货扫码按钮
+    handleScanCode() {
+      uni.scanCode({
+        success: (res) => {
+          // 扫码成功后，获取托盘信息
+          this.getTrayInfo(res.result);
+        },
+        fail: (err) => {
+          uni.showToast({
+            title: '扫码失败',
+            icon: 'none'
+          });
+        }
+      });
+    },
+    
+    // 获取托盘信息（复制自电脑端FloorTwo.vue）
+    getTrayInfo(trayCode) {
+      const params = {
+        traceid: trayCode.trim(),
+        zt: 'N',
+        chejian: '2500'
+      };
+      
+      uni.showLoading({
+        title: '查询托盘信息...'
+      });
+      
+      request.post('/order_info/selectList', params)
+        .then((res) => {
+          if (res.code === '200' && res.data && res.data.length > 0) {
+            console.log(`读取托盘成功：${JSON.stringify(res.data)}`);
+            // 处理扫码后托盘逻辑
+            this.dealScanCode(trayCode, res.data[0]);
+          } else {
+            uni.showToast({
+              title: `读取托盘失败：${trayCode}，请检查托盘是否存在`,
+              icon: 'none'
+            });
+          }
+        })
+        .catch((err) => {
+          uni.showToast({
+            title: '查询托盘失败，请重试',
+            icon: 'none'
+          });
+          console.error(`读取托盘失败：${trayCode}，请检查托盘是否存在`, err);
+        })
+        .finally(() => {
+          uni.hideLoading();
+        });
+    },
+    
+    // 处理扫码后托盘逻辑（复制自电脑端FloorTwo.vue）
+    dealScanCode(trayCode, wmsInfo) {
+      // 2500车间扫码后只有一个目的地：H队列(来料缓存区H1-H20)
+      request.post('/queue_info/queryQueueList', {
+        queueName: 'H'
+      })
+        .then(async (res) => {
+          if (res.code === '200' && res.data && res.data.length > 0) {
+            // 查找第一个空闲的托盘位置在来料缓存区(H1-H20)
+            const emptyPosition = res.data.find(
+              (item) =>
+                (item.trayInfo === null || item.trayInfo === '') &&
+                parseInt(item.queueNum) >= 1 &&
+                parseInt(item.queueNum) <= 20
+            );
+            
+            if (emptyPosition) {
+              // 说明有空缓存位置，根据托盘信息给AGV小车发送指令
+              uni.showLoading({
+                title: '发送AGV指令...'
+              });
+              
+              const robotTaskCode = await this.sendAgvCommand(
+                'PF-FMR-COMMON-JH10',
+                '101',
+                emptyPosition.queueName + emptyPosition.queueNum
+              );
+              
+              if (robotTaskCode !== '') {
+                // 更新托盘信息
+                const param = {
+                  id: emptyPosition.id,
+                  trayInfo: trayCode,
+                  trayStatus: '0',
+                  robotTaskCode: robotTaskCode,
+                  trayInfoAdd: wmsInfo.descrC,
+                  isLock: '1', // 默认上锁
+                  targetPosition: '', // 保存目的地信息
+                  mudidi: wmsInfo.mudidi // 保存目的地信息
+                };
+                
+                request.post('/queue_info/update', param)
+                  .then((updateRes) => {
+                    if (updateRes.code === '200' && updateRes.data == 1) {
+                      uni.showToast({
+                        title: '托盘已入库到来料缓存区',
+                        icon: 'success'
+                      });
+                      
+                      console.log(
+                        `托盘已入库：${trayCode}, 来料缓存区位置：${emptyPosition.queueName}${emptyPosition.queueNum}, 目的地：${wmsInfo.mudidi}`
+                      );
+                      
+                      // 回更WMS信息
+                      request.post('/order_info/update', {
+                        uuid: wmsInfo.uuid,
+                        zt: 'Y'
+                      })
+                        .then(() => {
+                          console.log(`已回更WMS信息成功`);
+                        })
+                        .catch((err) => {
+                          console.log(`托盘入库成功，回更WMS信息失败：${err}`);
+                        });
+                      
+                      // 刷新数据
+                      this.fetchQueueData();
+                    } else {
+                      uni.showToast({
+                        title: '托盘入库失败，请重试',
+                        icon: 'none'
+                      });
+                    }
+                  })
+                  .catch((err) => {
+                    uni.showToast({
+                      title: '托盘入库失败，请重试',
+                      icon: 'none'
+                    });
+                    console.error(`托盘入库失败：${trayCode},${err}`);
+                  });
+              }
+              
+              uni.hideLoading();
+            } else {
+              uni.showToast({
+                title: '来料缓存区(H1-H20)没有空闲位置',
+                icon: 'none'
+              });
+              console.log(`${trayCode} 托盘入库失败，来料缓存区(H1-H20)没有空闲位置`);
+            }
+          } else {
+            uni.showToast({
+              title: '查询队列失败',
+              icon: 'none'
+            });
+          }
+        })
+        .catch((err) => {
+          uni.showToast({
+            title: '查询队列失败',
+            icon: 'none'
+          });
+          console.error('查询H队列托盘情况失败:', err);
+        });
+    },
   }
 }
 </script>
@@ -1699,6 +1864,33 @@ export default {
         margin-right: 16rpx;
       }
       
+      .scan-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #10b981;
+        border-radius: 8rpx;
+        padding: 6rpx 16rpx;
+        margin-left: 8rpx;
+        gap: 4rpx;
+        
+        .scan-icon {
+          font-size: 20rpx;
+          color: #ffffff;
+        }
+        
+        .scan-text {
+          font-size: 24rpx;
+          color: #ffffff;
+          font-weight: 500;
+          white-space: nowrap;
+        }
+        
+        &:active {
+          background-color: #059669;
+        }
+      }
+      
       .refresh-btn {
         display: flex;
         align-items: center;
@@ -1706,7 +1898,7 @@ export default {
         background-color: #2563eb;
         border-radius: 8rpx;
         padding: 6rpx 16rpx;
-        margin-left: 16rpx;
+        margin-left: 8rpx;
         
         .refresh-text {
           font-size: 24rpx;
