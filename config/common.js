@@ -27,7 +27,7 @@ const serverConfig = {
   
   // 获取WebSocket服务完整地址
   getWebSocketUrl() {
-    return `ws://${this.ip.development}:${this.ports.websocket}`;
+    return `ws://${this.getCurrentIP()}:${this.ports.websocket}`;
   }
 };
 
