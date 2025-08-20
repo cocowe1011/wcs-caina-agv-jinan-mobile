@@ -11,6 +11,13 @@
 			"navigationBarTitleText": "智慧车间",
 			"navigationStyle": "custom"
 		}
+	}, {
+		"path": "pages/logs/logs",
+		"style": {
+			"navigationBarTitleText": "日志管理",
+			"navigationBarBackgroundColor": "#667eea",
+			"navigationBarTextStyle": "white"
+		}
 	}],
 	"globalStyle": {
 		"navigationBarTextStyle": "white",

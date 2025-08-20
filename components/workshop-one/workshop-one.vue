@@ -391,6 +391,7 @@
 import request from '@/config/request.js'
 import requestAgv from '@/config/requestAgv.js'
 import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
+import LogManager from '@/utils/LogManager.js'
 
 export default {
   name: 'workshop-one',
@@ -504,19 +505,28 @@ export default {
       const queueName = this.tabs[this.currentTab].code;
       this.loading = true;
       
+      // 记录数据查询日志
+      LogManager.log(`查询队列数据: ${queueName}`, '2800');
+      
       request.post('/queue_info/queryQueueList', {
         queueName: queueName,
       }).then(res => {
         if (res.code === '200' && Array.isArray(res.data)) {
-          this.queueData[queueName] = res.data
+          this.queueData[queueName] = res.data;
+          // 记录成功日志
+          LogManager.log(`队列数据查询成功: ${queueName}, 数量: ${res.data.length}`, '2800');
         } else {
           this.queueData[queueName] = [];
+          // 记录失败日志
+          LogManager.log(`队列数据查询失败: ${queueName}, 响应: ${JSON.stringify(res)}`, '2800');
           uni.showToast({
             title: '获取数据失败',
             icon: 'none'
           });
         }
       }).catch(err => {
+        // 记录错误日志
+        LogManager.log(`队列数据查询异常: ${queueName}, 错误: ${err.message || err}`, '2800');
         uni.showToast({
           title: '网络请求失败',
           icon: 'none'
@@ -596,7 +606,7 @@ export default {
             this.executeAgvSend(item);
           } else {
             // 用户点击取消，不执行任何操作
-            console.log('用户取消发送');
+            LogManager.log('用户取消发送托盘', '2800');
           }
         }
       });
@@ -607,6 +617,9 @@ export default {
       // 显示加载状态
       this.loading = true;
       this.$set(item, 'showDestinationInput', false);
+      
+      // 记录托盘发送操作日志
+      LogManager.log(`发送托盘: ${item.trayInfo}, 从${item.queueName + item.queueNum}到${item.destination}, 状态${item.trayStatus}`, '2800');
       
       // 判断目的地类型，决定任务类型和终点代码
       const destination = item.destination;
@@ -626,6 +639,7 @@ export default {
         toSiteCode = '301'; // AGV2-3队列
       } else {
         // 不支持的目的地格式
+        LogManager.log(`不支持的目的地格式: ${destination}, 托盘${item.trayInfo}`, '2800');
         uni.showToast({
           title: '输入的目的地不支持，请输入D*或E*格式',
           icon: 'none'
@@ -638,6 +652,9 @@ export default {
       this.sendAgvCommand(taskType, fromSiteCode, toSiteCode)
         .then(robotTaskCode => {
           if (robotTaskCode) {
+            // 记录AGV任务创建成功日志
+            LogManager.log(`AGV任务创建成功: 类型${taskType}, 任务码${robotTaskCode}, 从${fromSiteCode}到${toSiteCode}, 托盘${item.trayInfo}`, '2800');
+            
             // 更新托盘状态为正在发送中
             const param = {
               id: item.id,
@@ -649,6 +666,9 @@ export default {
             request.post('/queue_info/update', param)
               .then(res => {
                 if (res.code === '200' && res.data == 1) {
+                  // 记录托盘状态更新成功日志
+                  LogManager.log(`托盘状态更新成功: ${item.trayInfo}, 新状态3, 任务码${robotTaskCode}, 目的地${item.destination}`, '2800');
+                  
                   uni.showToast({
                     title: `托盘已发送至 ${item.destination}`,
                     icon: 'success'
@@ -661,6 +681,8 @@ export default {
                   // 重新加载当前区域数据
                   this.fetchQueueData();
                 } else {
+                  // 记录托盘状态更新失败日志
+                  LogManager.log(`托盘状态更新失败: ${item.trayInfo}, 响应: ${JSON.stringify(res)}`, '2800');
                   uni.showToast({
                     title: '托盘状态更新失败',
                     icon: 'none'
@@ -670,6 +692,8 @@ export default {
                 }
               })
               .catch(err => {
+                // 记录托盘状态更新异常日志
+                LogManager.log(`托盘状态更新异常: ${item.trayInfo}, 错误: ${err.message || err}`, '2800');
                 uni.showToast({
                   title: '托盘状态更新失败',
                   icon: 'none'
@@ -681,6 +705,8 @@ export default {
                 this.loading = false;
               });
           } else {
+            // 记录AGV指令发送失败日志
+            LogManager.log(`AGV指令发送失败: 类型${taskType}, 从${fromSiteCode}到${toSiteCode}, 托盘${item.trayInfo}`, '2800');
             uni.showToast({
               title: 'AGV指令发送失败',
               icon: 'none'
@@ -691,6 +717,8 @@ export default {
           }
         })
         .catch(err => {
+          // 记录AGV指令发送异常日志
+          LogManager.log(`AGV指令发送异常: 类型${taskType}, 从${fromSiteCode}到${toSiteCode}, 托盘${item.trayInfo}, 错误: ${err.message || err}`, '2800');
           uni.showToast({
             title: '发送指令失败',
             icon: 'none'
@@ -772,13 +800,21 @@ export default {
     
     // 扫码添加临时托盘功能
     scanToAddWasteTray(item) {
+      // 记录扫码操作开始日志
+      LogManager.log(`开始扫码添加临时托盘: 位置${item.queueName + item.queueNum}`, '2800');
+      
       // 调用扫码API
       uni.scanCode({
         success: (res) => {
+          // 记录扫码成功日志
+          LogManager.log(`扫码成功: 结果${res.result}, 位置${item.queueName + item.queueNum}, 类型添加临时托盘`, '2800');
+          
           // 扫码成功后，将扫码结果作为trayInfo传递
           this.updateToWasteTray(item, res.result);
         },
         fail: (err) => {
+          // 记录扫码失败日志
+          LogManager.log(`扫码失败: 位置${item.queueName + item.queueNum}, 类型添加临时托盘, 错误: ${err.message || err}`, '2800');
           uni.showToast({
             title: '扫码失败',
             icon: 'none'
@@ -903,10 +939,15 @@ export default {
     executePalletMove() {
       this.loading = true;
       
+      // 记录托盘移位操作开始日志
+      LogManager.log(`开始托盘移位: ${this.currentPallet.trayInfo}, 从${this.currentPallet.queueName + this.currentPallet.queueNum}到${this.selectedPosition}`, '2800');
+      
       // 找到目标位置对应的托盘数据
       const targetPosition = this.availablePositions.find(pos => pos.position === this.selectedPosition);
       
       if (!targetPosition) {
+        // 记录目标位置不存在日志
+        LogManager.log(`托盘移位目标位置不存在: 从${this.currentPallet.queueName + this.currentPallet.queueNum}到${this.selectedPosition}`, '2800');
         uni.showToast({
           title: '目标位置不存在',
           icon: 'none'
@@ -972,6 +1013,9 @@ export default {
       request.post('/queue_info/updateByList', updateList)
         .then(res => {
           if (res.code === '200' && res.data == 1) {
+            // 记录托盘移位成功日志
+            LogManager.log(`托盘移位成功: ${sourcePallet.trayInfo}, 从${sourcePallet.queueName + sourcePallet.queueNum}到${this.selectedPosition}`, '2800');
+            
             uni.showToast({
               title: '托盘移位成功',
               icon: 'success'
@@ -980,6 +1024,8 @@ export default {
             // 重新加载数据
             this.fetchQueueData();
           } else {
+            // 记录托盘移位失败日志
+            LogManager.log(`托盘移位失败: 从${sourcePallet.queueName + sourcePallet.queueNum}到${this.selectedPosition}, 响应: ${JSON.stringify(res)}`, '2800');
             uni.showToast({
               title: '托盘移位失败: ' + (res.msg || '未知错误'),
               icon: 'none'
@@ -987,6 +1033,8 @@ export default {
           }
         })
         .catch(err => {
+                      // 记录托盘移位异常日志
+            LogManager.log(`托盘移位异常: 从${sourcePallet.queueName + sourcePallet.queueNum}到${this.selectedPosition}, 错误: ${err.message || err}`, '2800');
           uni.showToast({
             title: '托盘移位请求失败',
             icon: 'none'
@@ -1434,13 +1482,13 @@ export default {
                   request.post('/queue_info/update', param)
                     .then((returnRes) => {
                       if (returnRes.code === '200' && returnRes.data == 1) {
-                        console.log(`手动调度去往缓存区：${toSiteCode}成功！`);
+                        LogManager.log(`手动调度去往缓存区：${toSiteCode}成功！`, '2800');
                         uni.showToast({
                           title: `手动调度去往缓存区：${toSiteCode}成功！`,
                           icon: 'success'
                         });
                       } else {
-                        console.log(`手动调度去往缓存区：${toSiteCode}失败！`);
+                        LogManager.log(`手动调度去往缓存区：${toSiteCode}失败！`, '2800');
                         uni.showToast({
                           title: `手动调度去往缓存区：${toSiteCode}失败！`,
                           icon: 'none'
@@ -1448,8 +1496,8 @@ export default {
                       }
                     })
                     .catch((err) => {
-                      console.log(
-                        `手动调度去往缓存区：${toSiteCode}失败！${err}`
+                      LogManager.log(
+                        `手动调度去往缓存区：${toSiteCode}失败！${err}`, '2800'
                       );
                       uni.showToast({
                         title: `手动调度去往缓存区：${toSiteCode}失败！${err}`,
@@ -1462,10 +1510,10 @@ export default {
                   title: `目的地：${toSiteCode}缓存位有托盘占位，请检查。`,
                   icon: 'none'
                 });
-                console.log(`目的地：${toSiteCode}缓存位有托盘占位，请检查。`);
+                LogManager.log(`目的地：${toSiteCode}缓存位有托盘占位，请检查。`, '2800');
               }
             } else {
-              console.log('没有此缓存区位置，请检查输入的缓存区位置是否正确');
+              LogManager.log('没有此缓存区位置，请检查输入的缓存区位置是否正确', '2800');
               uni.showToast({
                 title: '没有此缓存区位置，请检查输入的缓存区位置是否正确',
                 icon: 'none'
@@ -1501,8 +1549,8 @@ export default {
         } else {
           // 目前没有这种类型，报错
           taskType = 'ERROR';
-          console.log(
-            `${startPos}发送到${endPos}，没有这种任务类型，请检查！`
+          LogManager.log(
+            `${startPos}发送到${endPos}，没有这种任务类型，请检查！`, '2800'
           );
           uni.showToast({
             title: `${startPos}发送到${endPos}，没有这种任务类型，请检查！`,
@@ -1722,7 +1770,7 @@ export default {
 
     // WebSocket连接成功
     onWebSocketConnected() {
-      console.log('WebSocket连接成功');
+              LogManager.log('WebSocket连接成功', '2800');
       this.wsStatus.isConnected = true;
       uni.showToast({
         title: '连接服务器成功',
@@ -1733,7 +1781,7 @@ export default {
 
     // WebSocket连接断开
     onWebSocketDisconnected() {
-      console.log('WebSocket连接断开');
+              LogManager.log('WebSocket连接断开', '2800');
       this.wsStatus.isConnected = false;
       uni.showToast({
         title: '服务器连接断开',
@@ -1864,7 +1912,7 @@ export default {
         }
       } catch (error) {
         // 静默处理震动失败（通常是因为缺少用户交互）
-        console.log('震动提醒被浏览器阻止，需要用户交互后才能生效');
+        LogManager.log('震动提醒被浏览器阻止，需要用户交互后才能生效', '2800');
       }
     },
 
@@ -1900,7 +1948,7 @@ export default {
       request.post('/order_info/selectList', params)
         .then((res) => {
           if (res.code === '200' && res.data && res.data.length > 0) {
-            console.log(`读取托盘成功：${JSON.stringify(res.data)}`);
+            LogManager.log(`读取托盘成功：${JSON.stringify(res.data)}`, '2800');
             // 处理扫码后托盘逻辑
             this.dealScanCode(trayCode, res.data[0]);
           } else {
@@ -1986,8 +2034,8 @@ export default {
                         icon: 'success'
                       });
                       
-                      console.log(
-                        `托盘已入库：${trayCode}, 缓存区位置：${emptyPosition.queueName}${emptyPosition.queueNum}`
+                      LogManager.log(
+                        `托盘已入库：${trayCode}, 缓存区位置：${emptyPosition.queueName}${emptyPosition.queueNum}`, '2800'
                       );
                       
                       // 回更WMS信息
@@ -1996,10 +2044,10 @@ export default {
                         zt: 'Y'
                       })
                         .then(() => {
-                          console.log(`已回更WMS信息成功`);
+                          LogManager.log(`已回更WMS信息成功`, '2800');
                         })
                         .catch((err) => {
-                          console.log(`托盘入库成功，回更WMS信息失败：${err}`);
+                          LogManager.log(`托盘入库成功，回更WMS信息失败：${err}`, '2800');
                         });
                       
                       // 刷新数据
@@ -2026,7 +2074,7 @@ export default {
                 title: '缓存区没有空闲位置',
                 icon: 'none'
               });
-              console.log(`${trayCode} 托盘入库失败，缓存区没有空闲位置`);
+              LogManager.log(`${trayCode} 托盘入库失败，缓存区没有空闲位置`, '2800');
             }
           } else {
             uni.showToast({

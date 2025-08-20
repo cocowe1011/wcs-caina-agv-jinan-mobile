@@ -1274,13 +1274,13 @@ export default {
                   request.post('/queue_info/update', param)
                     .then((returnRes) => {
                       if (returnRes.code === '200' && returnRes.data == 1) {
-                        console.log(`手动调度去往缓存区：${toSiteCode}成功！`);
+                        LogManager.log(`手动调度去往缓存区：${toSiteCode}成功！`, '2500');
                         uni.showToast({
                           title: `手动调度去往缓存区：${toSiteCode}成功！`,
                           icon: 'success'
                         });
                       } else {
-                        console.log(`手动调度去往缓存区：${toSiteCode}失败！`);
+                        LogManager.log(`手动调度去往缓存区：${toSiteCode}失败！`, '2500');
                         uni.showToast({
                           title: `手动调度去往缓存区：${toSiteCode}失败！`,
                           icon: 'none'
@@ -1288,8 +1288,8 @@ export default {
                       }
                     })
                     .catch((err) => {
-                      console.log(
-                        `手动调度去往缓存区：${toSiteCode}失败！${err}`
+                      LogManager.log(
+                        `手动调度去往缓存区：${toSiteCode}失败！${err}`, '2500'
                       );
                       uni.showToast({
                         title: `手动调度去往缓存区：${toSiteCode}失败！${err}`,
@@ -1302,10 +1302,10 @@ export default {
                   title: `目的地：${toSiteCode}缓存位有托盘占位，请检查。`,
                   icon: 'none'
                 });
-                console.log(`目的地：${toSiteCode}缓存位有托盘占位，请检查。`);
+                LogManager.log(`目的地：${toSiteCode}缓存位有托盘占位，请检查。`, '2500');
               }
             } else {
-              console.log('没有此缓存区位置，请检查输入的缓存区位置是否正确');
+              LogManager.log('没有此缓存区位置，请检查输入的缓存区位置是否正确', '2500');
               uni.showToast({
                 title: '没有此缓存区位置，请检查输入的缓存区位置是否正确',
                 icon: 'none'
@@ -1341,8 +1341,8 @@ export default {
         } else {
           // 目前没有这种类型，报错
           taskType = 'ERROR';
-          console.log(
-            `${startPos}发送到${endPos}，没有这种任务类型，请检查！`
+          LogManager.log(
+            `${startPos}发送到${endPos}，没有这种任务类型，请检查！`, '2500'
           );
           uni.showToast({
             title: `${startPos}发送到${endPos}，没有这种任务类型，请检查！`,
@@ -1366,7 +1366,7 @@ export default {
             });
             if (res.code === '200' && res.data && res.data.length > 0) {
               if (res.data[0].trayInfo === null || res.data[0].trayInfo === '') {
-                console.log(`起点：${fromSiteCode}没有信息，请扫码录入信息。`);
+                LogManager.log(`起点：${fromSiteCode}没有信息，请扫码录入信息。`, '2500');
                 uni.showToast({
                   title: `起点：${fromSiteCode}没有信息，请扫码录入信息。`,
                   icon: 'none'

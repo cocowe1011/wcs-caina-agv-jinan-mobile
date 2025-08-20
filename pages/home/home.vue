@@ -12,7 +12,10 @@
           <text class="current-workshop">{{ currentWorkshopName }}</text>
         </view>
       </view>
-      <view class="logout" @tap="handleLogout">退出登录</view>
+      <view class="right-section">
+        <view class="logs-btn" @tap="goToLogManagement">日志</view>
+        <view class="logout" @tap="handleLogout">退出登录</view>
+      </view>
     </view>
     
     <!-- 可滚动的内容区域 -->
@@ -91,6 +94,13 @@ export default {
   },
   
   methods: {
+    // 导航到日志管理页面
+    goToLogManagement() {
+      uni.navigateTo({
+        url: '/pages/logs/logs'
+      })
+    },
+    
     handleLogout() {
       uni.showModal({
         title: '确认退出',
@@ -174,6 +184,25 @@ export default {
           font-weight: 500;
         }
       }
+    }
+    
+    .right-section {
+      display: flex;
+      align-items: center;
+      gap: 15rpx;
+    }
+    
+    .logs-btn {
+      font-size: 28rpx;
+      padding: 10rpx 20rpx;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 30rpx;
+      transition: all 0.3s ease;
+    }
+    
+    .logs-btn:active {
+      background: rgba(255, 255, 255, 0.2);
     }
     
     .logout {
