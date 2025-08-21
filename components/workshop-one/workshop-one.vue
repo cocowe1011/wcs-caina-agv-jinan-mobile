@@ -614,12 +614,33 @@ export default {
       let fromSiteCode = '';
       let toSiteCode = '';
       
+      // 检查起点限制：发往一楼目的地D，起点只能是一楼货物缓存库位；发往三楼目的地E，起点只能是三楼货物缓存库位
       if (destination.startsWith('D')) {
+        // 一楼目的地，起点必须是一楼货物缓存库位(C)
+        if (item.queueName !== 'C') {
+          uni.showToast({
+            title: '发往一楼目的地D，起点只能是一楼货物缓存库位',
+            icon: 'none'
+          });
+          this.loading = false;
+          this.$set(item, 'showDestinationInput', true);
+          return;
+        }
         // 一楼目的地，发送到AGV2-2队列
         taskType = 'PF-FMR-COMMON-JH2'; // 从缓存区到输送线
         fromSiteCode = item.queueName + item.queueNum;
         toSiteCode = '201'; // AGV2-2队列
       } else if (destination.startsWith('E')) {
+        // 三楼目的地，起点必须是三楼货物缓存库位(B)
+        if (item.queueName !== 'B') {
+          uni.showToast({
+            title: '发往三楼目的地E，起点只能是三楼货物缓存库位',
+            icon: 'none'
+          });
+          this.loading = false;
+          this.$set(item, 'showDestinationInput', true);
+          return;
+        }
         // 三楼目的地，发送到AGV2-3队列
         taskType = 'PF-FMR-COMMON-JH2'; // 从缓存区到输送线
         fromSiteCode = item.queueName + item.queueNum;
