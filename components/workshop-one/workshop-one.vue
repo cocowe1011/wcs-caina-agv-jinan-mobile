@@ -1261,7 +1261,7 @@ export default {
       // 组装入参
       const params = {
         robotTaskCode: robotTaskCode,
-        cancelType: 'CANCEL'
+        cancelType: 'DROP'
       };
       
       try {
