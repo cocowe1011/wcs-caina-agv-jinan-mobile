@@ -2,8 +2,9 @@
 const serverConfig = {
   // 服务器IP地址
   ip: {
-    // development: 'localhost',  // 开发环境IP
-    development: '192.168.1.9',  // 开发环境IP
+    // development: 'localhost',  // 本地开发环境IP
+    // development: '192.168.1.9',  // 家开发环境IP
+    development: '10.68.11.136',  // 公司开发环境IP
     production: '10.120.50.99'    // 生产环境IP
   },
   

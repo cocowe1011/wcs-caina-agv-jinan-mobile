@@ -2,7 +2,7 @@ const config = {
   baseUrl: process.env.NODE_ENV === 'development' 
     ? 'http://10.120.50.3'  // 开发环境
     : 'http://10.120.50.3', // 生产环境
-  timeout: 5000
+  timeout: 1000
 }
 
 // 封装请求方法

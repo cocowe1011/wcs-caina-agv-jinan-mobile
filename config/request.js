@@ -3,7 +3,7 @@ import serverConfig from './common.js'
 const config = {
   baseUrl: serverConfig.getHttpUrl(),  // 使用公共配置
   // 可选本地调试地址：'http://localhost:7005'
-  timeout: 5000
+  timeout: 2000
 }
 
 // 封装请求方法

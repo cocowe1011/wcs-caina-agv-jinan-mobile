@@ -384,6 +384,13 @@
         </view>
       </view>
     </view>
+    
+    <!-- PDA扫码组件 -->
+    <pda-scan 
+      :visible="showScanModal" 
+      @close="handleScanClose" 
+      @confirm="handleScanConfirm">
+    </pda-scan>
   </view>
 </template>
 
@@ -391,11 +398,18 @@
 import request from '@/config/request.js'
 import requestAgv from '@/config/requestAgv.js'
 import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
+import PdaScan from '@/components/pda-scan/pda-scan.vue'
 
 export default {
   name: 'workshop-one',
+  components: {
+    PdaScan
+  },
   data() {
     return {
+      // 扫码弹窗相关
+      showScanModal: false,
+      scanCallback: null, // 扫码成功后的回调函数
       currentTab: 0,
       tabs: [
         { name: '一楼货物缓存库位', code: 'C' },
@@ -433,6 +447,31 @@ export default {
         'AGV1-1': '202', // 一楼提升机出口
         'AGV3-1': '302'  // 三楼提升机出口
       },
+      // 机械臂点位到站点ID的映射
+      stationIdMap: {
+        'a1': '11',
+        'b1': '12',
+        'c1': '13',
+        'd1': '14',
+        'e1': '15',
+        'a2': '21',
+        'b2': '22',
+        'c2': '23',
+        'd2': '24'
+      },
+      // 机械臂位置到固定ID的映射（与PC端保持一致）
+      robotAreaIdMap: {
+        a1: 602,
+        b1: 603,
+        c1: 604,
+        d1: 605,
+        e1: 606,
+        a2: 607,
+        b2: 608,
+        c2: 609,
+        d2: 610,
+        e2: 611
+      },
       // 这些列表可以用于未来的校验或picker组件
       // startAgvPositions: [ { value: 'AGV2-1' }, { value: 'AGV1-1' }, { value: 'AGV3-1' } ],
       // endAgvPositions: [{ value: 'AGV2-2' }, { value: 'AGV2-3' }],
@@ -454,7 +493,8 @@ export default {
     displayedAgvTasks() {
       if (!this.allAgvTasks || this.allAgvTasks.length === 0) return [];
       
-      const runningStatuses = ['0', '1', '20', '21', '3', '4', '6', '7'];
+      // 扩展运行中的状态，包括机械臂相关状态
+      const runningStatuses = ['0', '1', '20', '21', '3', '4', '6', '7', '23', '24', '11', '12', '16', '17', '19', '25'];
       const activeTasks = this.allAgvTasks.filter(task => 
         task && task.id && task.trayInfo && runningStatuses.includes(task.trayStatus)
       );
@@ -467,7 +507,7 @@ export default {
         );
       } else if (this.currentAgvTaskTab === 'floor2') {
         floorTasks = activeTasks.filter(task => 
-          ['0', '1', '20', '21', '3', '4'].includes(task.trayStatus)
+          ['0', '1', '20', '21', '3', '4', '23', '24', '11', '12', '16', '17', '19', '25'].includes(task.trayStatus)
         );
       } else if (this.currentAgvTaskTab === 'floor3') {
         floorTasks = activeTasks.filter(task => 
@@ -542,6 +582,22 @@ export default {
           return '在缓存区等待AGV取货';
         case '4':
           return '缓存区已取,正运往目的地';
+        case '23':
+          return '在缓存区等待AGV取货（送往机械臂）';
+        case '24':
+          return '已在缓存区取货，正运往机械臂';
+        case '11':
+          return '在机械臂位置等待AGV取货';
+        case '12':
+          return 'AGV已在机械臂位置取货，正运往目的地';
+        case '16':
+          return '在空托盘区等待AGV取货';
+        case '17':
+          return 'AGV已在空托盘区取货，正运往C区';
+        case '19':
+          return '杂物托盘已送至输送线';
+        case '25':
+          return '已送至机械臂目的地';
         default:
           return '暂无托盘';
       }
@@ -562,6 +618,22 @@ export default {
           return 'status-waiting';
         case '4':
           return 'status-moving';
+        case '23':
+          return 'status-waiting';
+        case '24':
+          return 'status-moving';
+        case '11':
+          return 'status-waiting';
+        case '12':
+          return 'status-moving';
+        case '16':
+          return 'status-waiting';
+        case '17':
+          return 'status-moving';
+        case '19':
+          return 'status-moving';
+        case '25':
+          return 'status-delivered';
         default:
           return '';
       }
@@ -780,7 +852,10 @@ export default {
           return '';
         }
       } catch (err) {
-        console.error('发送AGV指令失败:', err);
+        uni.showToast({
+            title: '发送AGV指令失败:' + JSON.stringify(err),
+            icon: 'none'
+          });
         return '';
       }
     },
@@ -793,24 +868,27 @@ export default {
     
     // 扫码添加临时托盘功能
     scanToAddWasteTray(item) {
-      // 调用扫码API
-      uni.scanCode({
-        success: (res) => {
-          // 扫码成功后，将扫码结果作为trayInfo传递
-          this.updateToWasteTray(item, res.result);
-        },
-        fail: (err) => {
-          uni.showToast({
-            title: '扫码失败',
-            icon: 'none'
-          });
-        }
+      // 使用PDA扫码组件
+      this.openScanModal((scanCode) => {
+        // 扫码成功后，将扫码结果作为trayInfo传递
+        this.updateToWasteTray(item, scanCode);
       });
     },
     
     // 更新为临时托盘
-    updateToWasteTray(item, scanResult) {
+    async updateToWasteTray(item, scanResult) {
       this.loading = true;
+      
+      // 先调用AGV绑定接口
+      const slotCode = item.queueName + item.queueNum;
+      const bindSuccess = await this.sendAgvBindCommand(slotCode);
+      
+      if (!bindSuccess) {
+        uni.showToast({
+          title: 'AGV绑定失败，但将继续添加托盘',
+          icon: 'none'
+        });
+      }
       
       const param = {
         id: item.id,
@@ -921,7 +999,7 @@ export default {
     },
     
     // 执行托盘移位
-    executePalletMove() {
+    async executePalletMove() {
       this.loading = true;
       
       // 找到目标位置对应的托盘数据
@@ -944,8 +1022,32 @@ export default {
       // 目标位置托盘数据
       const targetPallet = targetPosition.item ? { ...targetPosition.item } : null;
       
+      const sourceSlotCode = sourcePallet.queueName + sourcePallet.queueNum;
+      const targetSlotCode = targetPallet.queueName + targetPallet.queueNum;
+      
       // 如果目标位置没有托盘信息，直接移动
       if (!targetPallet.trayInfo) {
+        // 情况：源位置托盘移到空位置
+        // 需要：在目标位置绑定，在源位置解绑
+        
+        // 先在目标位置绑定
+        const bindSuccess = await this.sendAgvBindCommand(targetSlotCode);
+        if (!bindSuccess) {
+          uni.showToast({
+            title: '目标位置AGV绑定失败，但将继续移动托盘',
+            icon: 'none'
+          });
+        }
+        
+        // 再在源位置解绑
+        const unbindSuccess = await this.sendAgvUnbindCommand(sourceSlotCode);
+        if (!unbindSuccess) {
+          uni.showToast({
+            title: '源位置AGV解绑失败，但将继续移动托盘',
+            icon: 'none'
+          });
+        }
+        
         // 目标位置获取源托盘信息
         updateList.push({
           id: targetPallet.id,
@@ -966,6 +1068,9 @@ export default {
           targetPosition: ''
         });
       } else {
+        // 情况：两个位置互换托盘，AGV只需要知道这两个位置都有托盘，不需要额外绑定/解绑
+        console.log(`托盘互换：${sourceSlotCode} ↔ ${targetSlotCode}，无需AGV绑定操作`);
+        
         // 如果目标位置有托盘，则交换五个指定参数
         
         // 目标位置托盘获取源托盘信息
@@ -1034,8 +1139,19 @@ export default {
     },
     
     // 移除托盘信息
-    removeTray(item) {
+    async removeTray(item) {
       this.loading = true;
+      
+      // 先调用AGV解绑接口
+      const slotCode = item.queueName + item.queueNum;
+      const unbindSuccess = await this.sendAgvUnbindCommand(slotCode);
+      
+      if (!unbindSuccess) {
+        uni.showToast({
+          title: 'AGV解绑失败，但将继续移除托盘',
+          icon: 'none'
+        });
+      }
       
       const param = {
         id: item.id,
@@ -1081,18 +1197,10 @@ export default {
     
     // 校验托盘条码
     verifyTrayCode(item) {
-      // 调用扫码API
-      uni.scanCode({
-        success: (res) => {
-          // 扫码成功后，将扫码结果作为trayInfo传递
-          this.updateTrayCode(item, res.result);
-        },
-        fail: (err) => {
-          uni.showToast({
-            title: '扫码失败',
-            icon: 'none'
-          });
-        }
+      // 使用PDA扫码组件
+      this.openScanModal((scanCode) => {
+        // 扫码成功后，将扫码结果作为trayInfo传递
+        this.updateTrayCode(item, scanCode);
       });
     },
     
@@ -1190,7 +1298,15 @@ export default {
         '6': task.queueName === 'AGV2-2' ? '等待一楼AGV取货' : '等待三楼AGV取货',
         '7': task.queueName === 'AGV2-2'
             ? 'AGV已在一楼AGV1-1取货，正运往目的地'
-            : 'AGV已在三楼AGV3-1取货，正运往目的地'
+            : 'AGV已在三楼AGV3-1取货，正运往目的地',
+        '23': '在缓存区等待AGV取货（送往机械臂）',
+        '24': '已在缓存区取货，正运往机械臂',
+        '11': '在机械臂位置等待AGV取货',
+        '12': 'AGV已在机械臂位置取货，正运往目的地',
+        '16': '在空托盘区等待AGV取货',
+        '17': 'AGV已在空托盘区取货，正运往C区',
+        '19': '杂物托盘已送至输送线',
+        '25': '已送至机械臂目的地'
       };
       return statusMap[task.trayStatus] || `未知状态 (${task.trayStatus})`;
     },
@@ -1205,6 +1321,14 @@ export default {
             case '4': return 'status-moving';  // 已在缓存区取货，正往运往目的地
             case '6': return 'status-waiting'; // 等待一楼AGV取货
             case '7': return 'status-moving';  // AGV已在一楼AGV1-1取货，正运往目的地
+            case '23': return 'status-waiting'; // 在缓存区等待AGV取货（送往机械臂）
+            case '24': return 'status-moving';  // 已在缓存区取货，正运往机械臂
+            case '11': return 'status-waiting'; // 在机械臂位置等待AGV取货
+            case '12': return 'status-moving';  // AGV已在机械臂位置取货，正运往目的地
+            case '16': return 'status-waiting'; // 在空托盘区等待AGV取货
+            case '17': return 'status-moving';  // AGV已在空托盘区取货，正运往C区
+            case '19': return 'status-moving';  // 杂物托盘已送至输送线
+            case '25': return 'status-delivered'; // 已送至机械臂目的地
             default: return '';
         }
     },
@@ -1407,8 +1531,8 @@ export default {
       let fromSiteCode = '';
       let toSiteCode = '';
 
-      const startPos = this.agvScheduleData.startPosition.trim().toUpperCase();
-      const endPos = this.agvScheduleData.endPosition.trim().toUpperCase();
+      const startPos = this.agvScheduleData.startPosition.trim();
+      const endPos = this.agvScheduleData.endPosition.trim(); // 保留原始大小写
 
       if (startPos === 'AGV2-1') {
         // 说明起点是转盘
@@ -1530,6 +1654,23 @@ export default {
             icon: 'none'
           });
         }
+      } else if (
+        startPos.startsWith('A') &&
+        ['a1', 'a2', 'b1', 'b2', 'd1', 'd2', 'e1', 'c1', 'c2'].includes(endPos)
+      ) {
+        // A区到机械臂（PF-FMR-COMMON-JH2） - 与PC端逻辑保持一致
+        taskType = 'PF-FMR-COMMON-JH2';
+        fromSiteCode = startPos;
+        toSiteCode = this.convertToStationId(endPos);
+        this.agvScheduleData.status = 'singleRunning';
+        
+        // 发送时判断队列数据，如果有队列数据则一起处理
+        await this.handleAgvSendWithQueueCheck(
+          taskType,
+          fromSiteCode,
+          toSiteCode,
+          endPos
+        );
       } else {
         // 说明起点是缓存区
         fromSiteCode = startPos;
@@ -1727,6 +1868,157 @@ export default {
       }
     },
 
+    // 将机械臂点位转换为站点ID的辅助方法
+    convertToStationId(siteCode) {
+      // 检查是否是机械臂点位（a1, b1, c1, d1, e1, a2, b2, c2, d2）
+      const lowerSiteCode = siteCode.toLowerCase();
+      if (this.stationIdMap[lowerSiteCode]) {
+        return this.stationIdMap[lowerSiteCode];
+      }
+      return siteCode; // 如果不是机械臂点位，返回原始值
+    },
+    
+    // A区到机械臂的AGV调度（带队列数据检查）- 与PC端逻辑完全一致
+    async handleAgvSendWithQueueCheck(taskType, fromSiteCode, toSiteCode, targetPosition) {
+      try {
+        // 1. 首先查询A区的队列数据
+        const aQueueRes = await request.post('/queue_info/queryQueueList', {
+          queueName: 'A'
+        });
+        
+        let queueDataToProcess = null;
+        
+        if (aQueueRes.code === '200' && aQueueRes.data && aQueueRes.data.length > 0) {
+          // 查找匹配的队列数据
+          const matchedQueueItem = aQueueRes.data.find(
+            (item) =>
+              item.queueName + item.queueNum === fromSiteCode &&
+              item.trayInfo &&
+              item.trayInfo !== '' &&
+              item.trayStatus === '2' // 已送至2楼缓存区的状态
+          );
+          
+          if (matchedQueueItem) {
+            queueDataToProcess = matchedQueueItem;
+            console.log(
+              `找到队列数据：托盘${matchedQueueItem.trayInfo}，目的地${matchedQueueItem.mudidi}`
+            );
+          }
+        }
+        
+        // 2. 如果是A区发到c1或c2，先发送解绑接口
+        if (
+          fromSiteCode.startsWith('A') &&
+          (targetPosition === 'c1' || targetPosition === 'c2')
+        ) {
+          const stationId = this.convertToStationId(targetPosition);
+          console.log(`A区发到${targetPosition}，先发送解绑接口：${stationId}`);
+
+          const unbindSuccess = await this.sendAgvUnbindCommand(stationId);
+          if (!unbindSuccess) {
+            console.log(`AGV解绑失败，但将继续发送AGV指令`);
+            uni.showToast({
+              title: 'AGV解绑失败，但将继续发送AGV指令',
+              icon: 'none'
+            });
+          } else {
+            console.log(`AGV解绑成功：${stationId}`);
+          }
+        }
+        
+        // 3. 发送AGV指令
+        const robotTaskCode = await this.sendAgvCommand(
+          taskType,
+          fromSiteCode,
+          toSiteCode
+        );
+        
+        if (robotTaskCode && robotTaskCode !== '') {
+          // 4. 如果有队列数据，一起处理队列数据
+          if (queueDataToProcess) {
+            await this.updateQueueDataWithAgvTask(
+              queueDataToProcess,
+              robotTaskCode,
+              targetPosition
+            );
+          } else {
+            console.log(`AGV指令发送成功，任务码：${robotTaskCode}`);
+            uni.showToast({
+              title: 'AGV指令发送成功',
+              icon: 'success'
+            });
+          }
+        } else {
+          console.log('AGV指令发送失败');
+          uni.showToast({
+            title: 'AGV指令发送失败',
+            icon: 'none'
+          });
+        }
+      } catch (error) {
+        console.error(`处理AGV发送和队列数据时出错：${error.message}`);
+        uni.showToast({
+          title: `处理AGV发送和队列数据时出错：${error.message}`,
+          icon: 'none'
+        });
+      }
+    },
+    
+    // 更新队列数据与AGV任务关联 - 与PC端逻辑完全一致
+    async updateQueueDataWithAgvTask(queueItem, robotTaskCode, targetPosition) {
+      try {
+        // 获取目标机械臂位置的固定ID
+        const targetId = this.robotAreaIdMap[targetPosition];
+        
+        if (!targetId) {
+          console.log(`未找到目标位置${targetPosition}的ID映射`);
+          uni.showToast({
+            title: `未找到目标位置${targetPosition}的ID映射`,
+            icon: 'none'
+          });
+          return;
+        }
+        
+        // 更新队列数据状态
+        const updateParams = [
+          {
+            id: queueItem.id,
+            trayStatus: '23', // 送往机械臂目的地，正在等待AGV取货
+            robotTaskCode: robotTaskCode,
+            targetPosition: targetPosition,
+            targetId: targetId
+          },
+          {
+            id: targetId, // 给目标机械手位置上锁
+            isLock: '1'
+          }
+        ];
+        
+        const res = await request.post('/queue_info/updateByList', updateParams);
+        if (res.code === '200' && res.data == 1) {
+          console.log(
+            `已为${targetPosition}位置发送AGV送货任务，托盘：${queueItem.trayInfo}，并锁定机械手队列`
+          );
+          uni.showToast({
+            title: `已为${targetPosition}位置自动调度托盘${queueItem.trayInfo}`,
+            icon: 'success'
+          });
+        } else {
+          console.log(`队列数据更新失败`);
+          uni.showToast({
+            title: '队列数据更新失败',
+            icon: 'none'
+          });
+        }
+      } catch (error) {
+        console.error(`更新队列数据失败：${error.message}`);
+        uni.showToast({
+          title: `更新队列数据失败：${error.message}`,
+          icon: 'none'
+        });
+      }
+    },
+    
     // ============ WebSocket和报警日志相关方法 ============
     // 初始化WebSocket连接
     initWebSocket() {
@@ -1889,20 +2181,35 @@ export default {
       }
     },
 
+    // === 扫码组件相关方法 ===
+    // 打开扫码弹窗
+    openScanModal(callback) {
+      this.scanCallback = callback;
+      this.showScanModal = true;
+    },
+    
+    // 关闭扫码弹窗
+    handleScanClose() {
+      this.showScanModal = false;
+      this.scanCallback = null;
+    },
+    
+    // 确认扫码结果
+    handleScanConfirm(scanCode) {
+      this.showScanModal = false;
+      if (this.scanCallback && typeof this.scanCallback === 'function') {
+        this.scanCallback(scanCode);
+      }
+      this.scanCallback = null;
+    },
+
     // === 新增：上货扫码相关方法 ===
     // 点击上货扫码按钮
     handleScanCode() {
-      uni.scanCode({
-        success: (res) => {
-          // 扫码成功后，获取托盘信息
-          this.getTrayInfo(res.result);
-        },
-        fail: (err) => {
-          uni.showToast({
-            title: '扫码失败',
-            icon: 'none'
-          });
-        }
+      // 使用PDA扫码组件
+      this.openScanModal((scanCode) => {
+        // 扫码成功后，获取托盘信息
+        this.getTrayInfo(scanCode);
       });
     },
     
@@ -2063,6 +2370,68 @@ export default {
           });
           console.error('查询队列托盘情况失败:', err);
         });
+    },
+    
+    // AGV托盘绑定
+    async sendAgvBindCommand(slotCode) {
+      const params = {
+        carrierCategory: 'PALLET',
+        carrierType: '2',
+        colCount: 1,
+        invoke: 'BIND',
+        slotCategory: 'SITE',
+        slotCode: slotCode,
+        temporary: 1
+      };
+      console.log(`发送AGV绑定指令: 位置=${slotCode}`);
+      try {
+        const res = await requestAgv.post(
+          '/rcs/rtas/api/robot/controller/site/bind',
+          params
+        );
+        if (res.code === 'SUCCESS') {
+          console.log(`AGV绑定成功: 位置${slotCode}`);
+          return true;
+        } else {
+          const errorMsg = res.message || '未知错误';
+          console.error(`AGV绑定失败: ${errorMsg}`);
+          return false;
+        }
+      } catch (err) {
+        console.error('发送AGV绑定指令失败:', err);
+        return false;
+      }
+    },
+    
+    // AGV托盘解绑
+    async sendAgvUnbindCommand(slotCode) {
+      const params = {
+        carrierCategory: 'PALLET',
+        carrierType: '2',
+        colCount: 1,
+        invoke: 'UNBIND',
+        slotCategory: 'SITE',
+        slotCode: slotCode,
+        temporary: 1
+      };
+      console.log(`发送AGV解绑指令: 位置=${slotCode}`);
+      try {
+        const res = await requestAgv.post(
+          '/rcs/rtas/api/robot/controller/site/bind',
+          params
+        );
+        if (res.code === 'SUCCESS') {
+          console.log(`AGV解绑成功: 位置${slotCode}`);
+          return true;
+        } else {
+          const errorMsg = res.message || '未知错误';
+          console.error(`AGV解绑失败: ${errorMsg}`);
+          return false;
+        }
+      } catch (err) {
+        console.error('发送AGV解绑指令失败:', err);
+        return false;
+      }
     },
   }
 }
