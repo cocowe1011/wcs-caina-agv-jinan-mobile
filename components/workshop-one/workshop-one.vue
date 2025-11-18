@@ -2310,7 +2310,8 @@ export default {
                   trayInfo: trayCode,
                   trayStatus: '0',
                   robotTaskCode,
-                  trayInfoAdd: wmsInfo.descrC
+                  trayInfoAdd: wmsInfo.descrC,
+                  mudidi: wmsInfo.mudidi
                 };
                 
                 request.post('/queue_info/update', param)
