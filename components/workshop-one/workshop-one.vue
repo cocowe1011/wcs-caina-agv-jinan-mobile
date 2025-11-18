@@ -2263,6 +2263,13 @@ export default {
         queueName = 'A';
       } else if (wmsInfo.mudidi === '2800-3') {
         queueName = 'B';
+      } else if (
+        wmsInfo.mudidi === '2800-2801' ||
+        wmsInfo.mudidi === '2800-2802' ||
+        wmsInfo.mudidi === '2800-2803' ||
+        wmsInfo.mudidi === '2800-2804'
+      ) {
+        queueName = 'A';
       } else {
         uni.showToast({
           title: `托盘入库失败：${trayCode}，目的地为${wmsInfo.mudidi}，不支持的入库目的地`,
