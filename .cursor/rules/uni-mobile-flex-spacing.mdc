@@ -1,0 +1,43 @@
+---
+description: UniApp 移动端布局间距不用 flex gap，改用 margin 以兼容 WebView
+globs: **/*.vue
+alwaysApply: false
+---
+
+# 移动端 Flex 间距（优先 margin）
+
+## 原因
+
+- 部分 Android WebView / 旧内核对 **`display: flex` + `gap`** 支持不完整，间距会**不生效**。
+- 本项目为 **UniApp 移动端**，样式以真机可行为准。
+
+## 原则
+
+- **不要用** `gap` / `row-gap` / `column-gap` 作为 flex 子项间距的主要手段。
+- **优先用** `margin` 或 **相邻兄弟选择器** 表达同等间距。
+
+## 推荐写法
+
+```scss
+/* ❌ 避免（移动端可能失效） */
+.row {
+  display: flex;
+  gap: 16rpx;
+}
+
+/* ✅ 横向：后项左边距 */
+.row > .item + .item {
+  margin-left: 16rpx;
+}
+/* 或首项右侧：.item:first-child { margin-right: 16rpx; } */
+
+/* ✅ 纵向：后项上边距 */
+.col > .block + .block {
+  margin-top: 20rpx;
+}
+/* 或末项除外：> *:not(:last-child) { margin-bottom: 24rpx; } */
+```
+
+## 注意
+
+- 若某子节点使用内联 `style` 设置 `margin`（如 `margin-left: auto`），会覆盖同属性的样式规则，按需保留业务布局。

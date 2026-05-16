@@ -1,4 +1,6 @@
 <script>
+	import LogFileUtil from '@/utils/LogFileUtil.js'
+
 	export default {
 		onLaunch: function() {
 			// 检查登录状态
@@ -14,6 +16,8 @@
 		},
 		onHide: function() {
 			console.log('App Hide')
+			// 切后台或即将被系统回收时，尽量刷尽内存中的日志缓冲
+			LogFileUtil.getInstance().flushAllLogBuffers()
 		}
 	}
 </script>

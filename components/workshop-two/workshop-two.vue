@@ -362,6 +362,7 @@
 import request from '@/config/request.js'
 import requestAgv from '@/config/requestAgv.js'
 import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
+import LogFileUtil from '@/utils/LogFileUtil.js'
 
 export default {
   name: 'workshop-two',
@@ -441,12 +442,17 @@ export default {
   created() {
     this.fetchQueueData();
     this.initWebSocket();
+    this.logUtil = LogFileUtil.getInstance();
   },
   beforeDestroy() {
     // 组件销毁前断开WebSocket连接
     if (this.wsClient) {
       this.wsClient.disconnect();
       this.wsClient = null;
+    }
+    // 刷新日志缓冲区
+    if (this.logUtil) {
+      this.logUtil.flushAllLogBuffers();
     }
   },
   methods: {
@@ -606,6 +612,10 @@ export default {
           }
         ]
       };
+
+      this.addLog(
+        `发送AGV指令: 类型=${taskType}, 起点=${fromSiteCode}, 终点=${toSiteCode}`
+      );
       
       try {
         // 发送AGV指令
@@ -618,6 +628,7 @@ export default {
             title: 'AGV指令发送成功',
             icon: 'success'
           });
+          this.addLog(`AGV指令发送成功: ${JSON.stringify(res.data)}`);
           return res.data.robotTaskCode;
         } else {
           // 处理各种错误类型
@@ -643,11 +654,16 @@ export default {
             title: errorMsg,
             icon: 'none'
           });
+          this.addLog(`AGV指令发送失败: ${errorMsg}`);
+          this.addLog(`AGV指令发送失败: ${errorMsg}`, 'alarm');
           
           return '';
         }
       } catch (err) {
         console.error('发送AGV指令失败:', err);
+        const errorMsg = err.message || JSON.stringify(err) || '未知错误';
+        this.addLog(`AGV指令发送失败: ${errorMsg}`);
+        this.addLog(`AGV指令发送失败: ${errorMsg}`, 'alarm');
         return '';
       }
     },
@@ -698,6 +714,7 @@ export default {
               title: '临时托盘添加成功',
               icon: 'success'
             });
+            this.addLog(`临时托盘添加成功：${scanResult}，位置：${item.queueName}${item.queueNum}`);
             
             // 更新本地数据
             this.$set(item, 'trayInfo', scanResult); // 使用扫码结果
@@ -711,6 +728,7 @@ export default {
               title: '临时托盘添加失败',
               icon: 'none'
             });
+            this.addLog(`临时托盘添加失败`, 'alarm');
           }
         })
         .catch(err => {
@@ -718,7 +736,7 @@ export default {
             title: '网络请求失败',
             icon: 'none'
           });
-          console.error('更新失败:', err);
+          this.addLog(`临时托盘网络请求失败`, 'alarm');
         })
         .finally(() => {
           this.loading = false;
@@ -876,7 +894,7 @@ export default {
         });
       } else {
         // 情况：两个位置互换托盘，AGV只需要知道这两个位置都有托盘，不需要额外绑定/解绑
-        console.log(`托盘互换：${sourceSlotCode} ↔ ${targetSlotCode}，无需AGV绑定操作`);
+        this.addLog(`托盘互换：${sourceSlotCode} ↔ ${targetSlotCode}，无需AGV绑定操作`);
         
         // 如果目标位置有托盘，则交换所有指定参数
         
@@ -915,6 +933,7 @@ export default {
               title: '托盘移位成功',
               icon: 'success'
             });
+            this.addLog(`托盘移位成功：${sourceSlotCode} → ${targetSlotCode}`);
             
             // 重新加载数据
             this.fetchQueueData();
@@ -923,6 +942,7 @@ export default {
               title: '托盘移位失败: ' + (res.msg || '未知错误'),
               icon: 'none'
             });
+            this.addLog(`托盘移位失败: ${res.msg || '未知错误'}`, 'alarm');
           }
         })
         .catch(err => {
@@ -930,7 +950,7 @@ export default {
             title: '托盘移位请求失败',
             icon: 'none'
           });
-          console.error('移位失败:', err);
+          this.addLog(`托盘移位请求失败`, 'alarm');
         })
         .finally(() => {
           this.loading = false;
@@ -986,6 +1006,7 @@ export default {
               title: '托盘信息已移除',
               icon: 'success'
             });
+            this.addLog(`托盘信息已移除：${item.trayInfo}，位置：${item.queueName}${item.queueNum}`);
             
             // 重新加载当前区域数据
             this.fetchQueueData();
@@ -994,6 +1015,7 @@ export default {
               title: '托盘信息移除失败',
               icon: 'none'
             });
+            this.addLog(`托盘信息移除失败`, 'alarm');
           }
         })
         .catch(err => {
@@ -1001,7 +1023,7 @@ export default {
             title: '网络请求失败',
             icon: 'none'
           });
-          console.error('移除失败:', err);
+          this.addLog(`移除托盘网络请求失败`, 'alarm');
         })
         .finally(() => {
           this.loading = false;
@@ -1041,6 +1063,7 @@ export default {
               title: '托盘条码更新成功',
               icon: 'success'
             });
+            this.addLog(`托盘条码更新成功：${item.trayInfo} → ${newTrayCode}`);
             
             // 更新本地数据
             this.$set(item, 'trayInfo', newTrayCode);
@@ -1052,6 +1075,7 @@ export default {
               title: '托盘条码更新失败',
               icon: 'none'
             });
+            this.addLog(`托盘条码更新失败`, 'alarm');
           }
         })
         .catch(err => {
@@ -1059,7 +1083,7 @@ export default {
             title: '网络请求失败',
             icon: 'none'
           });
-          console.error('更新失败:', err);
+          this.addLog(`托盘条码更新网络请求失败`, 'alarm');
         })
         .finally(() => {
           this.loading = false;
@@ -1161,16 +1185,19 @@ export default {
           .then((res) => {
             if (res.code === '200' && res.data == 1) {
               uni.showToast({ title: '任务取消请求已发送', icon: 'success' });
+              this.addLog(`托盘"${task.trayInfo}"的任务取消请求已发送`);
               // 刷新任务列表
               this.fetchAgvTasks();
             } else {
               uni.showToast({ title: '任务取消请求失败', icon: 'none' });
+              this.addLog(`AGV任务取消请求失败：${task.trayInfo}`, 'alarm');
               this.agvTasksLoading = false;
             }
           })
           .catch((err) => {
             console.error('取消AGV任务失败:', err);
             uni.showToast({ title: '取消AGV任务失败', icon: 'none' });
+            this.addLog(`取消AGV任务失败：${err}`, 'alarm');
             this.agvTasksLoading = false;
           });
       } else {
@@ -1188,6 +1215,10 @@ export default {
         robotTaskCode: robotTaskCode,
         cancelType: 'DROP'
       };
+
+      this.addLog(
+        `发送AGV取消指令: 机器人任务编码=${robotTaskCode}, 托盘信息=${trayInfo}`
+      );
       
       try {
         // 发送AGV指令
@@ -1200,6 +1231,7 @@ export default {
             title: 'AGV任务取消指令已发送',
             icon: 'success'
           });
+          this.addLog(`AGV指令发送成功: ${JSON.stringify(res.data)}`);
           // 成功时返回robotTaskCode
           return res.data.robotTaskCode;
         } else {
@@ -1231,14 +1263,19 @@ export default {
             title: errorMsg,
             icon: 'none'
           });
+          this.addLog(`AGV指令发送失败: ${errorMsg}`);
+          this.addLog(`AGV指令发送失败: ${errorMsg}`, 'alarm');
           return '';
         }
       } catch (err) {
         console.error('发送AGV指令失败:', err);
+        const errorMsg = err.message || JSON.stringify(err) || '未知错误';
         uni.showToast({
           title: '发送AGV取消指令失败',
           icon: 'none'
         });
+        this.addLog(`AGV指令发送失败: ${errorMsg}`);
+        this.addLog(`AGV指令发送失败: ${errorMsg}`, 'alarm');
         return '';
       }
     },
@@ -1280,10 +1317,12 @@ export default {
         }
         this.agvScheduleData.status = 'cycleRunning';
         uni.showToast({ title: '循环执行已启动（功能开发中）', icon: 'none' });
+        this.addLog(`AGV循环执行已启动：${this.agvScheduleData.startPosition} → ${this.agvScheduleData.endPosition}`);
         // TODO: 实现循环逻辑, 参考FloorFirst.vue, 可能涉及定时器和状态检查
       } else {
         this.agvScheduleData.status = 'idle';
         uni.showToast({ title: '循环执行已停止', icon: 'none' });
+        this.addLog('AGV调度已停止(循环)');
         // TODO: 清理循环相关的定时器等
       }
     },
@@ -1318,6 +1357,7 @@ export default {
         await this.handleK1ToK2(startPos, endPos);
       }
       else {
+        this.addLog('不支持的操作路径，请检查起点和终点');
         uni.showToast({
           title: '不支持的操作路径，请检查起点和终点',
           icon: 'none'
@@ -1349,21 +1389,21 @@ export default {
 
         // 显示AGV接口返回信息
         if (robotTaskCode !== '') {
-          console.log(`AGV5-1到${endPos}指令发送成功，任务码：${robotTaskCode}`);
+          this.addLog(`AGV5-1到${endPos}指令发送成功，任务码：${robotTaskCode}`);
           uni.showToast({
             title: `AGV指令发送成功\n任务码：${robotTaskCode}`,
             icon: 'success',
             duration: 3000
           });
         } else {
-          console.log(`AGV5-1到${endPos}指令发送失败`);
+          this.addLog(`AGV5-1到${endPos}指令发送失败`);
           uni.showToast({
             title: 'AGV指令发送失败',
             icon: 'none'
           });
         }
       } catch (e) {
-        console.log(`AGV5-1到${endPos}指令发送异常：${e}`);
+        this.addLog(`AGV5-1到${endPos}指令发送异常：${e}`);
         uni.showToast({
           title: 'AGV指令发送异常',
           icon: 'none'
@@ -1385,21 +1425,21 @@ export default {
 
         // 显示AGV接口返回信息
         if (robotTaskCode !== '') {
-          console.log(`从${startPos}到${endPos}指令发送成功，任务码：${robotTaskCode}`);
+          this.addLog(`从${startPos}到${endPos}指令发送成功，任务码：${robotTaskCode}`);
           uni.showToast({
             title: `AGV指令发送成功\n任务码：${robotTaskCode}`,
             icon: 'success',
             duration: 3000
           });
         } else {
-          console.log(`从${startPos}到${endPos}指令发送失败`);
+          this.addLog(`从${startPos}到${endPos}指令发送失败`);
           uni.showToast({
             title: 'AGV指令发送失败',
             icon: 'none'
           });
         }
       } catch (e) {
-        console.log(`从${startPos}到${endPos}指令发送异常：${e}`);
+        this.addLog(`从${startPos}到${endPos}指令发送异常：${e}`);
         uni.showToast({
           title: 'AGV指令发送异常',
           icon: 'none'
@@ -1421,21 +1461,21 @@ export default {
 
         // 显示AGV接口返回信息
         if (robotTaskCode !== '') {
-          console.log(`从${startPos}到${endPos}指令发送成功，任务码：${robotTaskCode}`);
+          this.addLog(`从${startPos}到${endPos}指令发送成功，任务码：${robotTaskCode}`);
           uni.showToast({
             title: `AGV指令发送成功\n任务码：${robotTaskCode}`,
             icon: 'success',
             duration: 3000
           });
         } else {
-          console.log(`从${startPos}到${endPos}指令发送失败`);
+          this.addLog(`从${startPos}到${endPos}指令发送失败`);
           uni.showToast({
             title: 'AGV指令发送失败',
             icon: 'none'
           });
         }
       } catch (e) {
-        console.log(`从${startPos}到${endPos}指令发送异常：${e}`);
+        this.addLog(`从${startPos}到${endPos}指令发送异常：${e}`);
         uni.showToast({
           title: 'AGV指令发送异常',
           icon: 'none'
@@ -1470,11 +1510,8 @@ export default {
         const res = await requestAgv.post('/rcs/rtas/api/robot/inner/controller/site/clearStack', params);
 
         if (res.code === 'SUCCESS') {
-          console.log(`巷道${stackCode}清空成功`);
-          uni.showToast({
-            title: `巷道${stackCode}清空成功`,
-            icon: 'success'
-          });
+          uni.showToast({ title: `巷道${stackCode}清空成功`, icon: 'success' });
+          this.addLog(`巷道${stackCode}清空成功`);
         } else {
           // 处理各种错误类型
           let errorMsg = '';
@@ -1489,18 +1526,35 @@ export default {
               errorMsg = res.message || '未知错误';
           }
           
-          console.log(`巷道${stackCode}清空失败：${errorMsg}`);
-          uni.showToast({
-            title: `巷道清空失败：${errorMsg}`,
-            icon: 'none'
-          });
+          uni.showToast({ title: `巷道${stackCode}清空失败：${errorMsg}`, icon: 'none' });
+          this.addLog(`巷道${stackCode}清空失败：${errorMsg}`, 'alarm');
         }
       } catch (err) {
-        console.error('发送巷道清空指令失败:', err);
-        uni.showToast({
-          title: '巷道清空请求失败',
-          icon: 'none'
-        });
+        uni.showToast({ title: `巷道清空请求失败：${stackCode}`, icon: 'none' });
+        this.addLog(`巷道清空请求失败：${stackCode}`, 'alarm');
+      }
+    },
+
+    // ============ 本地日志记录方法 ============
+    addLog(message, type = 'running') {
+      // 写入本地文件日志
+      if (this.logUtil) {
+        this.logUtil.writeLog('2500', message, type);
+      }
+      // 如果是报警日志，同时加入报警弹窗列表
+      if (type === 'alarm') {
+        const alarmLog = {
+          id: Date.now(),
+          type,
+          message,
+          timestamp: new Date().toISOString(),
+          source: '2500车间',
+          unread: true
+        };
+        this.alarmLogs.unshift(alarmLog);
+        if (this.alarmLogs.length > 100) {
+          this.alarmLogs.pop();
+        }
       }
     },
 
@@ -1547,6 +1601,10 @@ export default {
       // 保持日志数量在合理范围内
       if (this.alarmLogs.length > 100) {
         this.alarmLogs.pop();
+      }
+      // 写入本地文件日志
+      if (this.logUtil) {
+        this.logUtil.writeLog('2500', alarmLog.message || JSON.stringify(alarmLog), 'alarm');
       }
       // 显示通知
       uni.showToast({
@@ -1691,6 +1749,11 @@ export default {
         zt: 'N',
         chejian: '2500'
       };
+
+      this.addLog(`2500接货处扫码数据：${trayCode}`);
+      if (!trayCode || String(trayCode).trim() === '' || String(trayCode).toLowerCase().includes('noread')) {
+        this.addLog('2500接货处扫码失败：条码信息为NoRead', 'alarm');
+      }
       
       uni.showLoading({
         title: '查询托盘信息...'
@@ -1700,6 +1763,7 @@ export default {
         .then((res) => {
           if (res.code === '200' && res.data && res.data.length > 0) {
             console.log(`读取托盘成功：${JSON.stringify(res.data)}`);
+            this.addLog(`读取托盘成功：${JSON.stringify(res.data)}`);
             // 处理扫码后托盘逻辑
             this.dealScanCode(trayCode, res.data[0]);
           } else {
@@ -1707,13 +1771,17 @@ export default {
               title: `读取托盘失败：${trayCode}，请检查托盘是否存在`,
               icon: 'none'
             });
+            this.addLog(`读取托盘失败：${trayCode}，请检查托盘是否存在`);
+            this.addLog(`读取托盘失败：${trayCode}，请检查托盘是否存在`, 'alarm');
           }
         })
         .catch((err) => {
           uni.showToast({
-            title: '查询托盘失败，请重试',
+            title: '查询托盘失败，请重试' + err,
             icon: 'none'
           });
+          // 没查询到货物信息，直接报警
+          this.addLog(`读取托盘失败：${trayCode}，请检查托盘是否存在`);
           console.error(`读取托盘失败：${trayCode}，请检查托盘是否存在`, err);
         })
         .finally(() => {
@@ -1765,14 +1833,8 @@ export default {
                 request.post('/queue_info/update', param)
                   .then((updateRes) => {
                     if (updateRes.code === '200' && updateRes.data == 1) {
-                      uni.showToast({
-                        title: '托盘已入库到来料缓存区',
-                        icon: 'success'
-                      });
-                      
-                      console.log(
-                        `托盘已入库：${trayCode}, 来料缓存区位置：${emptyPosition.queueName}${emptyPosition.queueNum}, 目的地：${wmsInfo.mudidi}`
-                      );
+                      uni.showToast({ title: '托盘已入库', icon: 'success' });
+                      this.addLog(`托盘已入库：${trayCode}, 来料缓存区位置：${emptyPosition.queueName}${emptyPosition.queueNum}, 目的地：${wmsInfo.mudidi}`);
                       
                       // 回更WMS信息
                       request.post('/order_info/update', {
@@ -1780,37 +1842,30 @@ export default {
                         zt: 'Y'
                       })
                         .then(() => {
-                          console.log(`已回更WMS信息成功`);
+                          this.addLog(`已回更WMS信息成功`);
                         })
                         .catch((err) => {
-                          console.log(`托盘入库成功，回更WMS信息失败：${err}`);
+                          uni.showToast({ title: '回更WMS信息失败', icon: 'none' });
+                          this.addLog(`托盘入库成功，回更WMS信息失败：${err}`, 'alarm');
                         });
                       
                       // 刷新数据
                       this.fetchQueueData();
                     } else {
-                      uni.showToast({
-                        title: '托盘入库失败，请重试',
-                        icon: 'none'
-                      });
+                      uni.showToast({ title: '托盘入库失败', icon: 'none' });
+                      this.addLog(`托盘入库失败：${trayCode}`, 'alarm');
                     }
                   })
                   .catch((err) => {
-                    uni.showToast({
-                      title: '托盘入库失败，请重试',
-                      icon: 'none'
-                    });
-                    console.error(`托盘入库失败：${trayCode},${err}`);
+                    uni.showToast({ title: '托盘入库失败', icon: 'none' });
+                    this.addLog(`托盘入库失败：${trayCode},${err}`, 'alarm');
                   });
               }
               
               uni.hideLoading();
             } else {
-              uni.showToast({
-                title: '来料缓存区(H1-H20)没有空闲位置',
-                icon: 'none'
-              });
-              console.log(`${trayCode} 托盘入库失败，来料缓存区(H1-H20)没有空闲位置`);
+              uni.showToast({ title: '缓存区没有空闲位置', icon: 'none' });
+              this.addLog(`${trayCode} 托盘入库失败，来料缓存区(H1-H20)没有空闲位置`, 'alarm');
             }
           } else {
             uni.showToast({
@@ -1839,22 +1894,27 @@ export default {
         slotCode: slotCode,
         temporary: 1
       };
-      console.log(`发送AGV绑定指令: 位置=${slotCode}`);
+      this.addLog(`发送AGV绑定指令: 位置=${slotCode}`);
       try {
         const res = await requestAgv.post(
           '/rcs/rtas/api/robot/controller/site/bind',
           params
         );
         if (res.code === 'SUCCESS') {
-          console.log(`AGV绑定成功: 位置${slotCode}`);
+          this.addLog(`AGV绑定成功: 位置${slotCode}`);
           return true;
         } else {
           const errorMsg = res.message || '未知错误';
           console.error(`AGV绑定失败: ${errorMsg}`);
+          this.addLog(`AGV绑定失败: ${errorMsg}`);
+          this.addLog(`AGV绑定失败: ${errorMsg}`, 'alarm');
           return false;
         }
       } catch (err) {
         console.error('发送AGV绑定指令失败:', err);
+        const errorMsg = err.message || JSON.stringify(err) || '未知错误';
+        this.addLog(`AGV绑定失败: ${errorMsg}`);
+        this.addLog(`AGV绑定失败: ${errorMsg}`, 'alarm');
         return false;
       }
     },
@@ -1870,22 +1930,27 @@ export default {
         slotCode: slotCode,
         temporary: 1
       };
-      console.log(`发送AGV解绑指令: 位置=${slotCode}`);
+      this.addLog(`发送AGV解绑指令: 位置=${slotCode}`);
       try {
         const res = await requestAgv.post(
           '/rcs/rtas/api/robot/controller/site/bind',
           params
         );
         if (res.code === 'SUCCESS') {
-          console.log(`AGV解绑成功: 位置${slotCode}`);
+          this.addLog(`AGV解绑成功: 位置${slotCode}`);
           return true;
         } else {
           const errorMsg = res.message || '未知错误';
           console.error(`AGV解绑失败: ${errorMsg}`);
+          this.addLog(`AGV解绑失败: ${errorMsg}`);
+          this.addLog(`AGV解绑失败: ${errorMsg}`, 'alarm');
           return false;
         }
       } catch (err) {
         console.error('发送AGV解绑指令失败:', err);
+        const errorMsg = err.message || JSON.stringify(err) || '未知错误';
+        this.addLog(`AGV解绑失败: ${errorMsg}`);
+        this.addLog(`AGV解绑失败: ${errorMsg}`, 'alarm');
         return false;
       }
     },

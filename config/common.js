@@ -4,7 +4,8 @@ const serverConfig = {
   ip: {
     // development: 'localhost',  // 本地开发环境IP
     // development: '192.168.1.9',  // 家开发环境IP
-    development: '10.68.11.136',  // 公司开发环境IP
+    // development: '10.68.11.136',  // 公司开发环境IP
+	development: '192.168.31.174',  // 王康哥公司开发环境IP
     production: '10.120.50.99'    // 生产环境IP
   },
   

@@ -7,12 +7,16 @@
     <view class="header">
       <view class="left-section">
         <text class="welcome">欢迎回来，{{ username }}</text>
+      </view>
+      <view class="right-section">
         <view class="workshop-info">
           <text class="iconfont icon-location"></text>
           <text class="current-workshop">{{ currentWorkshopName }}</text>
         </view>
+        <view class="more-btn" @tap="handleMore">
+          <text class="more-icon">⋮</text>
+        </view>
       </view>
-      <view class="logout" @tap="handleLogout">退出登录</view>
     </view>
     
     <!-- 可滚动的内容区域 -->
@@ -34,17 +38,22 @@
         </view>
       </view>
     </scroll-view>
+
+    <!-- 日志管理弹窗 -->
+    <log-manage-modal :visible.sync="showLogModal" @close="showLogModal = false"></log-manage-modal>
   </view>
 </template>
 
 <script>
 import WorkshopOne from '@/components/workshop-one/workshop-one.vue'
 import WorkshopTwo from '@/components/workshop-two/workshop-two.vue'
+import LogManageModal from '@/components/log-manage-modal/log-manage-modal.vue'
 
 export default {
   components: {
     WorkshopOne,
-    WorkshopTwo
+    WorkshopTwo,
+    LogManageModal
   },
   data() {
     return {
@@ -52,7 +61,8 @@ export default {
       statusBarHeight: 0,
       pageReady: false,
       currentWorkshop: 1, // 默认显示2800车间
-      currentWorkshopName: '2800车间'
+      currentWorkshopName: '2800车间',
+      showLogModal: false
     }
   },
   
@@ -91,6 +101,18 @@ export default {
   },
   
   methods: {
+    handleMore() {
+      uni.showActionSheet({
+        itemList: ['日志管理', '退出登录'],
+        success: (res) => {
+          if (res.tapIndex === 0) {
+            this.showLogModal = true
+          } else if (res.tapIndex === 1) {
+            this.handleLogout()
+          }
+        }
+      })
+    },
     handleLogout() {
       uni.showModal({
         title: '确认退出',
@@ -151,6 +173,11 @@ export default {
         font-size: 32rpx;
         line-height: 1;
       }
+    }
+    
+    .right-section {
+      display: flex;
+      align-items: center;
       
       .workshop-info {
         font-size: 26rpx;
@@ -162,7 +189,7 @@ export default {
         border: 1px solid rgba(255, 255, 255, 0.2);
         line-height: 48rpx;
         height: 48rpx;
-        margin-left: 10rpx;
+        margin-right: 10rpx;
         
         .icon-location {
           font-size: 24rpx;
@@ -174,13 +201,19 @@ export default {
           font-weight: 500;
         }
       }
-    }
-    
-    .logout {
-      font-size: 28rpx;
-      padding: 10rpx 20rpx;
-      border: 1px solid rgba(255,255,255,0.5);
-      border-radius: 30rpx;
+      
+      .more-btn {
+        padding: 10rpx 20rpx;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        
+        .more-icon {
+          font-size: 44rpx;
+          line-height: 1;
+          font-weight: bold;
+        }
+      }
     }
   }
 

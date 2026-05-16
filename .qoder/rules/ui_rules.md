@@ -1,0 +1,107 @@
+---
+trigger: always_on
+---
+# 基础 UI 组件统一使用 uni-ui
+
+## 规则目的
+
+- 统一项目视觉与交互风格，**优先使用 uni-ui 官方组件库**。
+- 减少自定义基础组件（按钮、图标按钮、消息提示等）的重复造轮子。
+- 避免为基础组件再引入不适合移动端的第三方 UI 库（如 Element UI）。
+
+## 适用范围
+
+- 所有 `*.vue` 页面 / 组件。
+- 特别是：按钮、图标按钮、表单输入、列表项、弹窗等基础交互元素。
+
+## 总体原则
+
+- **优先使用 uni-ui 组件**（在 `uni_modules/uni-ui` 中提供）：
+  - 图标：`uni-icons`
+  - 按钮：`uni-button` 或 `button` 结合统一样式
+  - 表单输入：`uni-easyinput`、`uni-forms`、`uni-data-*` 系列
+  - 列表：`uni-list`、`uni-list-item`
+  - 提示类：`uni-popup`、`uni-notice-bar` 等
+- 只有当 uni-ui 难以满足业务需求时，才编写自定义组件，并应：
+  - 保持 API 风格与 uni-ui 接近；
+  - 将通用组件放入 `components/` 目录并复用，而不是在各页面零散写。
+
+## 图标使用（简要）
+
+- 图标一律使用 `uni-icons` 组件（详见 `uni-icons-usage.mdc` 规则）：
+
+```vue
+<uni-icons type="home" size="24" color="#333" />
+```
+
+- 禁止：
+  - 通过 CSS 画基础图标（边框 + transform 等）。
+  - 使用 PNG/SVG 作为通用小图标（业务图片除外）。
+
+## 按钮使用约定
+
+### 1. 基础按钮
+
+- 优先使用 `button` 并在项目中统一样式，或使用 `uni-ui` 中的按钮封装。
+- 推荐基础写法：
+
+```vue
+<button class="btn-primary" @tap="onSubmit">
+  提交
+</button>
+```
+
+```scss
+.btn-primary {
+  background: linear-gradient(90deg, #1a2a6c, #b21f1f);
+  color: #fff;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+}
+```
+
+- 所有“主操作按钮”（如提交、确认）应统一：
+  - 渐变主色：`#1a2a6c -> #b21f1f`；
+  - 圆角、字体大小等保持一致。
+
+### 2. 图标按钮
+
+- 图标按钮应由 `uni-icons` + 文本组成，不再自定义小图标：
+
+```vue
+<view class="icon-button" @tap="onScan">
+  <uni-icons type="scan" size="22" color="#1a2a6c" />
+  <text class="label">扫码</text>
+</view>
+```
+
+## 通知 / 弹窗
+
+- 全局提示优先使用 `uni.showToast`、`uni.showModal` 等 UniApp API。
+- 复杂交互弹窗、抽屉、气泡等优先使用：
+  - `uni-popup`
+  - `uni-drawer`
+  - `uni-tooltip`
+
+避免在多个页面中手写重复的弹窗 DOM + 动画逻辑。
+
+## 表单与输入
+
+- 表单推荐使用：
+  - `uni-forms` + `uni-easyinput`
+  - 或 `uni-data-select`、`uni-data-picker` 等数据组件。
+- 保证：
+  - 错误提示样式与 uni-ui 保持一致；
+  - 表单布局、间距统一。
+
+## 何时可以自定义组件
+
+仅在满足以下条件之一时才允许自定义基础 UI 组件：
+
+- uni-ui 无对应组件或样式差异过大；
+- 业务对性能 / 动画有特殊要求。
+
+自定义时需要：
+
+- 放在 `components/` 中，并编写清晰 props / 事件；
+- 命名规范、风格尽量与 uni-ui 一致（如 `XxxButton`、`XxxListItem`）。
