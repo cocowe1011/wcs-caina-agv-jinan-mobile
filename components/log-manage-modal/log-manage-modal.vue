@@ -5,12 +5,16 @@
       <view class="modal-header">
         <text class="modal-title">日志管理</text>
         <view class="header-actions">
-          <view class="refresh-btn" @tap="refreshFileList">
-            <uni-icons type="refresh" size="18" color="#fff" style="margin-right:8rpx;"></uni-icons>
-            <text class="action-text">刷新</text>
+          <view class="header-btn" :class="{ active: isAllSelected }" @tap="toggleSelectAll">
+            <uni-icons :type="isAllSelected ? 'checkbox-filled' : 'circle'" size="16" color="#fff"></uni-icons>
+            <text class="header-btn-text">全选</text>
           </view>
-          <view class="icon-btn" @tap="closeModal">
-            <uni-icons type="close" size="24" color="#fff"></uni-icons>
+          <view class="header-btn" @tap="refreshFileList">
+            <uni-icons type="refresh" size="16" color="#fff"></uni-icons>
+            <text class="header-btn-text">刷新</text>
+          </view>
+          <view class="header-btn close" @tap="closeModal">
+            <uni-icons type="close" size="18" color="#fff"></uni-icons>
           </view>
         </view>
       </view>
@@ -60,6 +64,11 @@
           :key="file.name"
           @click="viewLogFile(file)"
         >
+          <view class="file-checkbox" @tap.stop="toggleFileSelect(file)">
+            <view class="checkbox-wrap" :class="{ checked: selectedFiles.has(file.name) }">
+              <uni-icons v-if="selectedFiles.has(file.name)" type="checkmarkempty" size="14" color="#fff"></uni-icons>
+            </view>
+          </view>
           <view class="file-icon">
             <uni-icons type="bars" size="22" color="#1a2a6c"></uni-icons>
           </view>
@@ -80,6 +89,17 @@
           </view>
         </view>
       </scroll-view>
+
+      <!-- 底部上传按钮 -->
+      <view class="bottom-bar">
+        <view class="selected-info" v-if="selectedFiles.size > 0">
+          <text class="selected-count">已选 {{ selectedFiles.size }} 个文件</text>
+        </view>
+        <view class="bottom-btn upload-btn" :class="{ disabled: selectedFiles.size === 0 || uploading }" @tap="uploadSelectedFiles">
+          <uni-icons v-if="uploading" type="spinner-cycle" size="20" color="#fff" class="spin-icon"></uni-icons>
+          <text class="bottom-btn-text">{{ uploading ? '上传中...' : '上传日志到服务器' }}</text>
+        </view>
+      </view>
     </view>
 
     <!-- 日志内容查看弹窗 (嵌套) -->
@@ -113,6 +133,7 @@
 
 <script>
 import LogFileUtil from '@/utils/LogFileUtil.js'
+import serverConfig from '@/config/common.js'
 
 export default {
   name: 'LogManageModal',
@@ -129,7 +150,9 @@ export default {
       searchKeyword: '',
       showContentModal: false,
       currentFile: {},
-      logContent: ''
+      logContent: '',
+      selectedFiles: new Set(),
+      uploading: false
     }
   },
   computed: {
@@ -147,6 +170,10 @@ export default {
     logContentLines() {
       if (!this.logContent) return 0
       return this.logContent.split('\n').filter(l => l.trim()).length
+    },
+    isAllSelected() {
+      if (this.filteredFileList.length === 0) return false
+      return this.filteredFileList.every(f => this.selectedFiles.has(f.name))
     }
   },
   watch: {
@@ -158,6 +185,7 @@ export default {
         this.refreshFileList()
       } else {
         this.clearSearch()
+        this.selectedFiles = new Set()
       }
     }
   },
@@ -228,6 +256,124 @@ export default {
 
     clearSearch() {
       this.searchKeyword = ''
+    },
+
+    toggleFileSelect(file) {
+      if (this.selectedFiles.has(file.name)) {
+        this.selectedFiles.delete(file.name)
+      } else {
+        this.selectedFiles.add(file.name)
+      }
+      // 触发响应式更新
+      this.selectedFiles = new Set(this.selectedFiles)
+    },
+
+    toggleSelectAll() {
+      if (this.isAllSelected) {
+        // 取消全选 - 移除当前过滤列表中的文件
+        this.filteredFileList.forEach(f => this.selectedFiles.delete(f.name))
+      } else {
+        // 全选当前过滤列表
+        this.filteredFileList.forEach(f => this.selectedFiles.add(f.name))
+      }
+      this.selectedFiles = new Set(this.selectedFiles)
+    },
+
+    async uploadSelectedFiles() {
+      if (this.selectedFiles.size === 0 || this.uploading) return
+
+      const selectedNames = [...this.selectedFiles]
+      uni.showModal({
+        title: '确认上传',
+        content: `确定要将选中的 ${selectedNames.length} 个日志文件上传到服务器吗？`,
+        success: async (res) => {
+          if (res.confirm) {
+            this.uploading = true
+            let successCount = 0
+            let failCount = 0
+
+            for (const fileName of selectedNames) {
+              try {
+                await this.uploadSingleFile(fileName)
+                successCount++
+              } catch (error) {
+                console.error('上传文件失败:', fileName, error)
+                failCount++
+              }
+            }
+
+            this.uploading = false
+            this.selectedFiles = new Set()
+
+            if (failCount === 0) {
+              uni.showToast({ title: `${successCount}个文件上传成功`, icon: 'success' })
+            } else {
+              uni.showToast({ title: `成功${successCount}个，失败${failCount}个`, icon: 'none', duration: 3000 })
+            }
+          }
+        }
+      })
+    },
+
+    uploadSingleFile(fileName) {
+      return new Promise((resolve, reject) => {
+        // #ifdef APP-PLUS
+        this.logUtil.initLogDir().then((dirEntry) => {
+          dirEntry.getFile(
+            fileName,
+            { create: false },
+            (fileEntry) => {
+              const localUrl = fileEntry.toLocalURL()
+              const workshop = fileName.match(/^(\d+)_/)
+              const workshopVal = workshop ? workshop[1] : '2800'
+              const baseUrl = serverConfig.getHttpUrl()
+
+              const uploadTask = uni.uploadFile({
+                url: baseUrl + '/file/mobileUpload',
+                filePath: localUrl,
+                name: 'file',
+                formData: {
+                  workshop: workshopVal
+                },
+                timeout: 60000,
+                success: (res) => {
+                  if (res.statusCode === 200) {
+                    try {
+                      const data = JSON.parse(res.data)
+                      if (data.code === '200') {
+                        console.log('文件上传成功:', fileName)
+                        resolve(data)
+                      } else {
+                        console.error('文件上传失败:', data.message)
+                        reject(new Error(data.message || '上传失败'))
+                      }
+                    } catch (e) {
+                      console.error('解析上传响应失败:', e)
+                      reject(e)
+                    }
+                  } else {
+                    reject(new Error('HTTP状态码: ' + res.statusCode))
+                  }
+                },
+                fail: (err) => {
+                  console.error('上传请求失败:', err)
+                  reject(err)
+                }
+              })
+
+              // 可通过 uploadTask.abort() 取消上传
+            },
+            (error) => {
+              console.error('获取文件失败:', fileName, error)
+              reject(error)
+            }
+          )
+        }).catch(reject)
+        // #endif
+        // #ifndef APP-PLUS
+        reject(new Error('非APP环境，不支持文件上传'))
+        // #endif
+      })
     }
   }
 }
@@ -276,29 +422,32 @@ export default {
     display: flex;
     align-items: center;
     
-    .refresh-btn {
+    .header-btn {
       display: flex;
       align-items: center;
-      margin-right: 30rpx;
       padding: 10rpx 20rpx;
-      background: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.15);
       border-radius: 30rpx;
+      margin-left: 16rpx;
       
-      .action-text {
-        font-size: 26rpx;
+      .header-btn-text {
+        font-size: 24rpx;
         color: #fff;
+        margin-left: 6rpx;
       }
       
       &:active {
         background: rgba(255, 255, 255, 0.3);
       }
-    }
-    
-    .icon-btn {
-      padding: 10rpx;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      
+      &.active {
+        background: rgba(255, 255, 255, 0.3);
+      }
+      
+      &.close {
+        padding: 10rpx 14rpx;
+        border-radius: 50%;
+      }
     }
   }
 }
@@ -342,35 +491,12 @@ export default {
   }
 }
 
-.action-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 10rpx 20rpx 20rpx;
 
-  .action-btn {
-    display: flex;
-    align-items: center;
-    background: #fff;
-    padding: 16rpx 24rpx;
-    border-radius: 8rpx;
-    box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.05);
-    margin-left: 16rpx;
-
-    .action-icon {
-      margin-right: 8rpx;
-    }
-
-    .action-text-btn {
-      font-size: 26rpx;
-      color: #333;
-    }
-  }
-}
 
 .file-list {
   flex: 1;
   height: 0;
-  padding: 0 20rpx;
+  padding: 0 20rpx 20rpx;
   box-sizing: border-box;
 }
 
@@ -426,6 +552,32 @@ export default {
 
   &:active {
     background: #f8f9fa;
+  }
+
+  .file-checkbox {
+    margin-right: 20rpx;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8rpx;
+  }
+
+  .checkbox-wrap {
+    width: 40rpx;
+    height: 40rpx;
+    border-radius: 8rpx;
+    border: 3rpx solid #d1d5db;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    background: #fff;
+
+    &.checked {
+      background: #1a2a6c;
+      border-color: #1a2a6c;
+    }
   }
 
   .file-icon {
@@ -645,6 +797,64 @@ export default {
     color: #999;
     text-align: center;
     padding: 60rpx 0;
+  }
+}
+
+// 底部上传按钮栏
+.bottom-bar {
+  flex-shrink: 0;
+  padding: 20rpx 24rpx;
+  padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1rpx solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  box-sizing: border-box;
+
+  .selected-info {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 16rpx;
+
+    .selected-count {
+      font-size: 24rpx;
+      color: #1a2a6c;
+      font-weight: 500;
+    }
+  }
+
+  .bottom-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24rpx 0;
+    border-radius: 12rpx;
+    transition: all 0.2s ease;
+
+    .bottom-btn-text {
+      font-size: 30rpx;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .spin-icon {
+      margin-right: 12rpx;
+      animation: spin 1s linear infinite;
+    }
+
+    &:active {
+      opacity: 0.9;
+    }
+
+    &.upload-btn {
+      background: linear-gradient(90deg, #1a2a6c, #b21f1f);
+    }
+
+    &.disabled {
+      background: #ccc;
+      pointer-events: none;
+    }
   }
 }
 
