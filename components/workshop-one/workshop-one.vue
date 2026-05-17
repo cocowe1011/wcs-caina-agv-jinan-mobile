@@ -807,15 +807,26 @@ export default {
     async sendAgvCommand(taskType, fromSiteCode, toSiteCode) {
       // 组装入参
       // return Date.now().toString();
+
+      // 根据巷道类型确定type值
+      const getRouteType = (siteCode) => {
+        // 巷道编号(如25013)使用 STACK 类型
+        if (this.isStackPosition(siteCode)) {
+          return 'STACK';
+        }
+        // 其他位置默认为 SITE 类型
+        return 'SITE';
+      };
+
       const params = {
         taskType: taskType,
         targetRoute: [
           {
-            type: 'SITE',
+            type: getRouteType(fromSiteCode),
             code: fromSiteCode
           },
           {
-            type: 'SITE',
+            type: getRouteType(toSiteCode),
             code: toSiteCode
           }
         ]
@@ -1719,6 +1730,24 @@ export default {
           toSiteCode,
           endPos
         );
+      } else if (
+        startPos.startsWith('D') &&
+        endPos.startsWith('D')
+      ) {
+        // 一楼D区到D区互相调度（D和D之间的互相调度），任务编号PF-FMR-COMMON-PY
+        await this.handleDToD(startPos, endPos);
+      } else if (
+        startPos.startsWith('E') &&
+        endPos.startsWith('E')
+      ) {
+        // 三楼E区到E区互相调度，任务编号PF-FMR-COMMON-PY
+        await this.handleEToE(startPos, endPos);
+      } else if (
+        startPos.startsWith('E') &&
+        this.isStackPosition(endPos)
+      ) {
+        // 三楼E区到巷道调度，任务编号PF-FMR-STACK-ALGO-QC
+        await this.handleEToStack(startPos, endPos);
       } else {
         // 说明起点是缓存区
         fromSiteCode = startPos;
@@ -1921,6 +1950,107 @@ export default {
             return;
           }
         }
+      }
+    },
+
+    // 判断是否为巷道编号(如25013)
+    isStackPosition(position) {
+      return /^250(0[1-9]|1[0-3])$/i.test(position);
+    },
+
+    // 一楼D区到D区互相调度，纯命令模式，无队列校验
+    async handleDToD(startPos, endPos) {
+      this.agvScheduleData.status = 'singleRunning';
+      try {
+        const robotTaskCode = await this.sendAgvCommand(
+          'PF-FMR-COMMON-PY',
+          startPos,
+          endPos
+        );
+        if (robotTaskCode !== '') {
+          this.addLog(`手动调度(D→D)：${startPos} → ${endPos}指令发送成功，任务码：${robotTaskCode}`);
+          uni.showToast({
+            title: `AGV指令发送成功\n任务码：${robotTaskCode}`,
+            icon: 'success',
+            duration: 3000
+          });
+        } else {
+          this.addLog(`手动调度(D→D)：${startPos} → ${endPos}指令发送失败`);
+          uni.showToast({
+            title: 'AGV指令发送失败',
+            icon: 'none'
+          });
+        }
+      } catch (e) {
+        this.addLog(`手动调度(D→D)：${startPos} → ${endPos}指令发送异常：${e}`);
+        uni.showToast({
+          title: 'AGV指令发送异常',
+          icon: 'none'
+        });
+      }
+    },
+
+    // 三楼E区到E区互相调度，纯命令模式，无队列校验
+    async handleEToE(startPos, endPos) {
+      this.agvScheduleData.status = 'singleRunning';
+      try {
+        const robotTaskCode = await this.sendAgvCommand(
+          'PF-FMR-COMMON-PY',
+          startPos,
+          endPos
+        );
+        if (robotTaskCode !== '') {
+          this.addLog(`手动调度(E→E)：${startPos} → ${endPos}指令发送成功，任务码：${robotTaskCode}`);
+          uni.showToast({
+            title: `AGV指令发送成功\n任务码：${robotTaskCode}`,
+            icon: 'success',
+            duration: 3000
+          });
+        } else {
+          this.addLog(`手动调度(E→E)：${startPos} → ${endPos}指令发送失败`);
+          uni.showToast({
+            title: 'AGV指令发送失败',
+            icon: 'none'
+          });
+        }
+      } catch (e) {
+        this.addLog(`手动调度(E→E)：${startPos} → ${endPos}指令发送异常：${e}`);
+        uni.showToast({
+          title: 'AGV指令发送异常',
+          icon: 'none'
+        });
+      }
+    },
+
+    // 三楼E区到巷道调度，纯命令模式，无队列校验
+    async handleEToStack(startPos, stackCode) {
+      this.agvScheduleData.status = 'singleRunning';
+      try {
+        const robotTaskCode = await this.sendAgvCommand(
+          'PF-FMR-STACK-ALGO-QC',
+          startPos,
+          stackCode
+        );
+        if (robotTaskCode !== '') {
+          this.addLog(`手动调度(E→巷道)：${startPos} → 巷道${stackCode}指令发送成功，任务码：${robotTaskCode}`);
+          uni.showToast({
+            title: `AGV指令发送成功\n任务码：${robotTaskCode}`,
+            icon: 'success',
+            duration: 3000
+          });
+        } else {
+          this.addLog(`手动调度(E→巷道)：${startPos} → 巷道${stackCode}指令发送失败`);
+          uni.showToast({
+            title: 'AGV指令发送失败',
+            icon: 'none'
+          });
+        }
+      } catch (e) {
+        this.addLog(`手动调度(E→巷道)：${startPos} → 巷道${stackCode}指令发送异常：${e}`);
+        uni.showToast({
+          title: 'AGV指令发送异常',
+          icon: 'none'
+        });
       }
     },
 
